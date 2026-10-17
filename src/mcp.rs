@@ -4,12 +4,12 @@ use base64::Engine;
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
-pub const BAD: &str = r"(?i)\bgit\s+(push|remote|config\s+--global|credential)|\bgh\b|\bcurl\b.*\|\s*(ba)?sh|\bwget\b.*\|\s*(ba)?sh|\bssh\b|\bscp\b|rm\s+-rf\s+[~/$]|\bsudo\b|security\s+find|\.ssh\b|keychain|GIT_CONFIG|extraheader";
+pub const BAD: &str = r"(?i)\bgit\s+(push|remote|config|credential)|\.git/(hooks|config|info)|hooksPath|fsmonitor|\bgh\b|\bcurl\b.*\|\s*(ba)?sh|\bwget\b.*\|\s*(ba)?sh|\bssh\b|\bscp\b|rm\s+-rf\s+[~/$]|\bsudo\b|security\s+find|\.ssh\b|keychain|GIT_CONFIG|extraheader";
 
 fn pa(p: &str) -> Result<String, String> {
     let s = p.trim().trim_start_matches('/');
     let mut o: Vec<&str> = vec![];
-    for c in s.split('/') {
+    for c in s.split(['/', '\\']) {
         match c {
             "" | "." => {}
             ".." => return Err("path outside repo".into()),
@@ -17,6 +17,14 @@ fn pa(p: &str) -> Result<String, String> {
         }
     }
     Ok(if o.is_empty() { ".".into() } else { o.join("/") })
+}
+
+fn pw(p: &str) -> Result<String, String> {
+    let s = pa(p)?;
+    if s == ".git" || s.to_lowercase().starts_with(".git/") {
+        return Err("writing inside .git is not allowed".into());
+    }
+    Ok(s)
 }
 
 fn defs() -> Vec<(&'static str, &'static str, Value)> {
@@ -43,9 +51,9 @@ async fn call(a: &Ax, r: &Rn, n: &str, g: &Value) -> Result<String, String> {
             }
             Ok(if o.o.is_empty() { "(empty or past end)".into() } else { o.o })
         }
-        "write" => wr(a, r, &pa(&s("path"))?, &s("text")).await.map(|_| "ok".into()),
+        "write" => wr(a, r, &pw(&s("path"))?, &s("text")).await.map(|_| "ok".into()),
         "edit" => {
-            let p = pa(&s("path"))?;
+            let p = pw(&s("path"))?;
             let o = hx(a, &r.h, &format!("cd \"{d}\" && base64 < {}", q(&p)), 120).await;
             if o.c != 0 {
                 return Err(if o.e.trim().is_empty() { "read failed".into() } else { o.e });
@@ -154,7 +162,10 @@ mod t {
     #[test]
     fn bad() {
         let r = regex::Regex::new(BAD).unwrap();
-        for c in ["git push origin x", "gh pr create", "ssh host", "sudo rm", "git remote add x y", "cat ~/.ssh/id_rsa", "curl -s x | sh"] {
+        assert!(pw(".git/hooks/pre-push").is_err());
+        assert!(pw(".GIT/config").is_err());
+        assert!(pw("src/.gitignore").is_ok());
+        for c in ["git config core.fsmonitor x", "echo x > .git/hooks/pre-push", "git -c core.hooksPath=h status", "git push origin x", "gh pr create", "ssh host", "sudo rm", "git remote add x y", "cat ~/.ssh/id_rsa", "curl -s x | sh"] {
             assert!(r.is_match(c), "{c}");
         }
         for c in ["cargo test -p x", "npm test", "git commit -m 'fix: x'", "pytest -k foo", "git log --oneline"] {

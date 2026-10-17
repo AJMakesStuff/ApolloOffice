@@ -1,7 +1,7 @@
 import json, os, re, subprocess, sys
 
 a = sys.argv[1:]
-sysp = a[a.index("--system-prompt") + 1]
+sysp = open(a[a.index("--system-prompt-file") + 1]).read()
 p = sys.stdin.read()
 mc = a[a.index("--mcp-config") + 1] if "--mcp-config" in a else None
 open(os.environ["FAKE_GH_DIR"] + "/claude.log", "a").write(sysp.split("\n")[0][:60] + "\n")

@@ -91,7 +91,12 @@ pub async fn ask(a: &Ax, o: Ask) -> R<(String, Value)> {
     a.stmd(o.w, &o.md);
     let e0 = a.dd.join("empty");
     let _ = std::fs::create_dir_all(&e0);
-    let mut av: Vec<String> = vec!["-p", "--model", &o.md, "--setting-sources", "project", "--strict-mcp-config", "--no-session-persistence", "--system-prompt", &o.sys, "--output-format", "stream-json", "--verbose", "--max-turns"].into_iter().map(String::from).collect();
+    let rd = a.dd.join("run");
+    let _ = std::fs::create_dir_all(&rd);
+    let sf = rd.join(format!("sys-{}.md", hex::encode(rand::random::<[u8; 8]>())));
+    let _ = std::fs::write(&sf, &o.sys);
+    let sfs = sf.display().to_string();
+    let mut av: Vec<String> = vec!["-p", "--model", &o.md, "--setting-sources", "project", "--strict-mcp-config", "--no-session-persistence", "--system-prompt-file", &sfs, "--output-format", "stream-json", "--verbose", "--max-turns"].into_iter().map(String::from).collect();
     av.push(o.turns.to_string());
     if let Some(e) = o.ef {
         av.extend(["--effort".into(), e.into()]);
@@ -153,6 +158,7 @@ pub async fn ask(a: &Ax, o: Ask) -> R<(String, Value)> {
     if !tk.is_empty() {
         a.runs.lock().unwrap().remove(&tk);
     }
+    let _ = std::fs::remove_file(&sf);
     if let Some((f, tf)) = mf {
         let _ = std::fs::remove_file(f);
         let _ = std::fs::remove_file(tf);

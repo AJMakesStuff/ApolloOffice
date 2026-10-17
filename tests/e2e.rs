@@ -9,18 +9,20 @@ fn sh(d: &Path, c: &str) {
     assert!(o.status.success(), "{c}: {}", String::from_utf8_lossy(&o.stderr));
 }
 
+#[cfg(windows)]
 fn wrap(d: &Path, n: &str, py: &Path) -> PathBuf {
-    if cfg!(windows) {
-        let f = d.join(format!("{n}.cmd"));
-        std::fs::write(&f, format!("@python \"{}\" %*\r\n", py.display())).unwrap();
-        f
-    } else {
-        let f = d.join(n);
-        std::fs::write(&f, format!("#!/bin/sh\nexec python3 \"{}\" \"$@\"\n", py.display())).unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
-        f
-    }
+    let f = d.join(format!("{n}.cmd"));
+    std::fs::write(&f, format!("@python \"{}\" %*\r\n", py.display())).unwrap();
+    f
+}
+
+#[cfg(unix)]
+fn wrap(d: &Path, n: &str, py: &Path) -> PathBuf {
+    let f = d.join(n);
+    std::fs::write(&f, format!("#!/bin/sh\nexec python3 \"{}\" \"$@\"\n", py.display())).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+    f
 }
 
 fn furl(p: &Path) -> String {

@@ -92,7 +92,7 @@
       <div class="fm">
         ${nw && h.id !== "local" ? `<label>SSH host</label><input type="text" name="ssh" placeholder="alias from ~/.ssh/config or user@host"><div class="hint">Key login must work without a password prompt.</div>` : ""}
         <label>Isolation</label><select name="dk"><option value="1" ${h.dk !== 0 ? "selected" : ""}>Docker container (recommended)</option><option value="0" ${h.dk === 0 ? "selected" : ""}>directly on the machine</option></select>
-        <div class="hint raw" ${h.dk === 0 ? "" : "hidden"}><span style="color:var(--bad)">Workers build and run code from the repositories you add, directly with your user account. Only do this for repositories you trust.</span><br>${tg("raw", h.dk === 0 && !nw, "I understand")}</div>
+        <div class="hint raw" ${h.dk === 0 ? "" : "hidden"}><span style="color:var(--bad)">Workers build and run code from the repositories you add, directly with your user account, which can reach your GitHub, Claude and SSH logins on this machine. Only do this for repositories you trust.</span><br>${tg("raw", h.dk === 0 && !nw, "I understand")}</div>
         <label>Parallel jobs</label><input type="number" name="ln" min="1" max="8" value="${h.ln || 1}">
         <label>Parallel test runs</label><input type="number" name="ci" min="1" max="8" value="${h.ci || 1}">
         <label>Disk limit (GB)</label><input type="number" name="gb" min="5" value="${h.gb || 50}">

@@ -384,16 +384,18 @@ async fn watch1(a: &Ax) -> R<()> {
             }
             let okc: Vec<&Value> = nw.iter().filter(|c| !g[c["id"].as_str().unwrap_or("")]["inj"].as_bool().unwrap_or(false)).collect();
             if !okc.is_empty() {
-                let pr = format!("PR {tag}: {}\n\n{}", v["title"].as_str().unwrap_or(""), okc.iter().map(|c| wrap(c["id"].as_str().unwrap_or(""), &format!("{} by {} ({})\n\n{}", c["k"].as_str().unwrap_or(""), c["by"].as_str().unwrap_or(""), c["as"].as_str().unwrap_or(""), crate::sh::head(c["t"].as_str().unwrap_or(""), 4000)))).collect::<Vec<_>>().join("\n\n"));
+                let mc: Vec<&Value> = okc.iter().filter(|c| MA.contains(&c["as"].as_str().unwrap_or(""))).cloned().collect();
+                let ma = !mc.is_empty();
+                let src: &Vec<&Value> = if ma { &mc } else { &okc };
+                let pr = format!("PR {tag}: {}\n\n{}", v["title"].as_str().unwrap_or(""), src.iter().map(|c| wrap(c["id"].as_str().unwrap_or(""), &format!("{} by {} ({})\n\n{}", c["k"].as_str().unwrap_or(""), c["by"].as_str().unwrap_or(""), c["as"].as_str().unwrap_or(""), crate::sh::head(c["t"].as_str().unwrap_or(""), 4000)))).collect::<Vec<_>>().join("\n\n"));
                 let mut o = Ask::new("watcher", a.md("watcher"), P("watcher"), pr);
                 o.ef = Some("low");
                 let (_, js) = ask(a, o).await?;
-                let ma = okc.iter().any(|c| MA.contains(&c["as"].as_str().unwrap_or("")));
                 let by = okc.iter().filter_map(|c| c["by"].as_str()).collect::<Vec<_>>().join(", ");
                 let act = js["act"].as_bool().unwrap_or(false);
                 if act && ma && a.db.n("select count(*) from jobs where repo=? and pr=? and kind='review' and st not in ('done','drop')", pa![r.clone(), n]) == 0 {
                     let ch = js["change"].as_str().unwrap_or("").to_string();
-                    a.db.jnew(&r, n, "review", v["title"].as_str().unwrap_or(""), v["url"].as_str().unwrap_or(""), "ready", &ch, json!({"change": ch, "comment": crate::sh::head(&okc.iter().map(|c| format!("{}: {}", c["by"].as_str().unwrap_or(""), c["t"].as_str().unwrap_or(""))).collect::<Vec<_>>().join("\n\n"), 6000), "branch": hrn, "head": hd, "test_cmd": p["d"]["test_cmd"]}), Some(n), -1.0);
+                    a.db.jnew(&r, n, "review", v["title"].as_str().unwrap_or(""), v["url"].as_str().unwrap_or(""), "ready", &ch, json!({"change": ch, "comment": crate::sh::head(&mc.iter().map(|c| format!("{}: {}", c["by"].as_str().unwrap_or(""), c["t"].as_str().unwrap_or(""))).collect::<Vec<_>>().join("\n\n"), 6000), "branch": hrn, "head": hd, "test_cmd": p["d"]["test_cmd"]}), Some(n), -1.0);
                     a.flow("watcher", "fixer", "review");
                     a.say("watcher", &format!("{tag}: change requested by {by}, sent to Fixer"), None);
                     a.note("Change requested", &format!("{tag} ({by}): {ch}\n\nDraft reply:\n{}\n{}", js["draft"].as_str().unwrap_or("-"), v["url"].as_str().unwrap_or("")), 4);

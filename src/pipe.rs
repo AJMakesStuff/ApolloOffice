@@ -62,7 +62,33 @@ async fn auth() -> R<String> {
         return e("gh has no token, run gh auth login");
     }
     use base64::Engine;
-    Ok(format!("export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0={}; ", q(&format!("AUTHORIZATION: basic {}", base64::engine::general_purpose::STANDARD.encode(format!("x-access-token:{t}"))))))
+    Ok(format!("export GIT_CONFIG_COUNT=3 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0={} GIT_CONFIG_KEY_1=core.hooksPath GIT_CONFIG_VALUE_1=/dev/null GIT_CONFIG_KEY_2=core.fsmonitor GIT_CONFIG_VALUE_2=false; ", q(&format!("AUTHORIZATION: basic {}", base64::engine::general_purpose::STANDARD.encode(format!("x-access-token:{t}"))))))
+}
+
+pub fn cfg_ok(l: &str, url: &str) -> Result<(), String> {
+    let ok = Regex::new(r"^(core\.(repositoryformatversion|filemode|bare|logallrefupdates|ignorecase|precomposeunicode|symlinks)|remote\.origin\.(url|fetch|promisor|partialclonefilter)|branch\.[^=]*\.(remote|merge)|user\.(name|email)|extensions\.(objectformat|partialclone)|gc\.[a-z]+|maintenance\.[a-z]+|fetch\.[a-z]+|init\.[a-z]+)$").unwrap();
+    for x in l.lines().map(|x| x.trim()).filter(|x| !x.is_empty()) {
+        let (k, v) = x.split_once('=').unwrap_or((x, ""));
+        let k = k.to_lowercase();
+        if !ok.is_match(&k) {
+            return Err(format!("unexpected git config {k}"));
+        }
+        if k == "remote.origin.url" && v != url {
+            return Err("origin points somewhere else".into());
+        }
+    }
+    Ok(())
+}
+
+async fn gck(a: &Ax, j: &Job) -> R<()> {
+    let l = x(a, j, "git config --local --list", 60).await;
+    if l.c != 0 {
+        return Err(oe(&l, "git config --list", &j.h()));
+    }
+    if let Err(m) = cfg_ok(&l.o, &format!("{}{}.git", gitb(), j.repo)) {
+        return drop(format!("the clone's git config was changed ({m}), not using it with credentials"));
+    }
+    Ok(())
 }
 
 fn use_(a: &Ax, j: &mut Job, md: &str) {
@@ -122,6 +148,10 @@ async fn prep(a: &Ax, j: &mut Job) -> R<()> {
     let au = auth().await?;
     hx(a, &j.h(), &format!("pkill -f \"{d}/\" 2>/dev/null; true"), 60).await;
     let ex = hx(a, &j.h(), &format!("test -d \"{d}/.git\""), 60).await.c == 0;
+    let ex = ex && {
+        let l = hx(a, &j.h(), &format!("cd \"{d}\" && git config --local --list"), 60).await;
+        l.c == 0 && cfg_ok(&l.o, &format!("{}{}.git", gitb(), j.repo)).is_ok()
+    };
     if ex {
         let r = hx(a, &j.h(), &format!("{au}cd \"{d}\" && {{ git rebase --abort; git merge --abort; git cherry-pick --abort; }} 2>/dev/null; git reset -q --hard && git clean -fdq && git fetch -q --prune origin"), 1200).await;
         if r.c != 0 {
@@ -150,7 +180,7 @@ async fn prep(a: &Ax, j: &mut Job) -> R<()> {
         j.d["old"] = json!(ok(a, j, "git rev-parse HEAD", 60).await?);
     }
     let su = rp(a, &j.repo)["setup"].as_str().unwrap_or("").trim().to_string();
-    if !su.is_empty() && j.kind != "hunt" || !su.is_empty() && j.kind == "hunt" {
+    if !su.is_empty() {
         a.say("repro", &format!("[{}] setup: {}", j.h(), crate::sh::head(&su, 80)), Some(j.id));
         let r = x(a, j, &format!("to 1800 bash -c {} 2>&1 | tail -c 3000; exit ${{PIPESTATUS[0]}}", q(&su)), 1900).await;
         if r.c != 0 {
@@ -625,6 +655,7 @@ async fn reb(a: &Ax, j: &mut Job) -> R<()> {
     a.st("fixer", "work", Some(j.id), "");
     let mn = j.s("mn");
     a.say("fixer", &format!("rebasing {}#{} onto {mn}", j.repo, j.pr.unwrap_or(0)), Some(j.id));
+    gck(a, j).await?;
     let au = auth().await?;
     ok(a, j, &format!("{au}git fetch -q origin {}", q(&mn)), 600).await?;
     let r = x(a, j, &format!("git rebase -q origin/{}", q(&mn)), 600).await;
@@ -750,6 +781,7 @@ async fn gate(a: &Ax, j: &mut Job) -> R<()> {
     }
     race(a, j, "at the gate").await?;
     let mn = j.s("mn");
+    gck(a, j).await?;
     let au = auth().await?;
     ok(a, j, &format!("{au}git fetch -q origin {}", q(&mn)), 600).await?;
     let nb = ok(a, j, &format!("git rev-parse origin/{}", q(&mn)), 60).await?;
@@ -886,6 +918,7 @@ async fn submit(a: &Ax, j: &mut Job) -> R<(String, i64)> {
     };
     let url = format!("{}{}.git", gitb(), hr);
     let br = j.s("br");
+    gck(a, j).await?;
     let au = auth().await?;
     let rem = ok(a, j, &format!("{au}git ls-remote {} refs/heads/{} | cut -f1", q(&url), q(&br)), 120).await.unwrap_or_default();
     if rem != sha {
@@ -1475,6 +1508,18 @@ mod t {
         assert!(b.starts_with("Found while testing `a.rs:3`"));
         assert!(!b.contains("#0"));
         assert!(b.contains("Regression tests `a`, `b`: fail on"));
+    }
+
+    #[test]
+    fn gitcfg() {
+        let u = "https://github.com/o/r.git";
+        let l = "core.repositoryformatversion=0\ncore.filemode=true\nremote.origin.url=https://github.com/o/r.git\nremote.origin.fetch=+refs/heads/*:refs/remotes/origin/*\nremote.origin.promisor=true\nremote.origin.partialclonefilter=blob:none\nbranch.main.remote=origin\nbranch.main.merge=refs/heads/main\nuser.name=T\nuser.email=t@t\nextensions.partialclone=origin\n";
+        assert!(cfg_ok(l, u).is_ok());
+        assert!(cfg_ok(&format!("{l}core.fsmonitor=curl x\n"), u).is_err());
+        assert!(cfg_ok(&format!("{l}core.hookspath=/tmp/h\n"), u).is_err());
+        assert!(cfg_ok(&format!("{l}url.https://evil/.insteadof=https://github.com/\n"), u).is_err());
+        assert!(cfg_ok(&format!("{l}include.path=/tmp/x\n"), u).is_err());
+        assert!(cfg_ok(&l.replace("github.com/o/r", "evil.com/o/r"), u).is_err());
     }
 
     #[test]
