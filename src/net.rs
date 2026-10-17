@@ -1,0 +1,59 @@
+use crate::app::{sl, Ax, X, R};
+use crate::db::now;
+use crate::sh::{gh, hosts, hx};
+use std::sync::atomic::{AtomicI64, Ordering};
+
+static LAST: AtomicI64 = AtomicI64::new(0);
+
+async fn ck(a: &Ax, k: &str) -> bool {
+    match k {
+        "gh" => gh(&["api", "rate_limit", "--jq", ".rate.remaining"], 30).await.is_ok(),
+        "an" => a.hc.get("https://api.anthropic.com/").timeout(std::time::Duration::from_secs(15)).send().await.is_ok(),
+        h => hx(a, h, "true", 30).await.c == 0,
+    }
+}
+
+pub async fn probe(a: &Ax, ks: &[String]) {
+    let v = futures::future::join_all(ks.iter().map(|k| ck(a, k))).await;
+    let mut l = a.lv.lock().unwrap();
+    for (k, ok) in ks.iter().zip(v) {
+        l.o.net.insert(k.clone(), ok);
+    }
+    l.o.off = !*l.o.net.get("gh").unwrap_or(&true) || !*l.o.net.get("an").unwrap_or(&true);
+    LAST.store(now(), Ordering::Relaxed);
+}
+
+pub async fn all(a: &Ax) {
+    let mut ks: Vec<String> = vec!["gh".into(), "an".into()];
+    ks.extend(hosts(a).into_iter().filter(|h| h.on).map(|h| h.id));
+    probe(a, &ks).await;
+}
+
+pub async fn need(a: &Ax, w: &str, ks: &[&str]) -> R<()> {
+    let mut b = 30_000u64;
+    let ks: Vec<String> = ks.iter().filter(|k| !k.is_empty()).map(|k| k.to_string()).collect();
+    loop {
+        if now() - LAST.load(Ordering::Relaxed) > 20_000 || ks.iter().any(|k| !a.net(k)) {
+            probe(a, &ks).await;
+        }
+        let miss: Vec<String> = ks.iter().filter(|k| !a.net(k)).cloned().collect();
+        if miss.is_empty() {
+            return Ok(());
+        }
+        for k in &miss {
+            if k != "gh" && k != "an" && crate::sh::ho(a, k).map(|h| !h.on).unwrap_or(true) {
+                return Err(X::Back(format!("{k} left the office")));
+            }
+        }
+        a.say(w, &format!("offline: {} unreachable, retry in {} s", miss.join(", "), b / 1000), None);
+        sl(b).await;
+        b = (b * 2).min(300_000);
+    }
+}
+
+pub async fn watch(a: Ax) {
+    loop {
+        all(&a).await;
+        sl(60_000).await;
+    }
+}
