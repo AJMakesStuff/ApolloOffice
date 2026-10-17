@@ -133,7 +133,6 @@ async fn scout1(a: &Ax) -> R<()> {
         }
     }
     a.st("scout", "idle", None, "");
-    a.say("scout", "pass done, next in 5 min", None);
     Ok(())
 }
 
