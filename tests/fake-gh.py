@@ -39,7 +39,7 @@ if a[0] == "api":
         print(5000)
         sys.exit(0)
     if p == f"repos/{R}":
-        out({"full_name": R, "default_branch": "main", "private": False, "fork": False, "archived": False, "permissions": {"push": True}})
+        out({"full_name": R, "default_branch": "main", "private": os.environ.get("FAKE_GH_PRIVATE") == "1", "fork": False, "archived": False, "permissions": {"push": True}})
     if "/timeline" in p or "/comments" in p or "/reviews" in p:
         out([[]])
     if "/contents/" in p:

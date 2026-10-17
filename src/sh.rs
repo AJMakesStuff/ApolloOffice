@@ -117,11 +117,12 @@ pub struct Rq<'a> {
     pub rm: Vec<String>,
     pub cwd: Option<PathBuf>,
     pub ln: Option<&'a (dyn Fn(&str) + Send + Sync)>,
+    pub keep: bool,
 }
 
 impl<'a> Default for Rq<'a> {
     fn default() -> Self {
-        Rq { i: None, t: 120, env: vec![], rm: vec![], cwd: None, ln: None }
+        Rq { i: None, t: 120, env: vec![], rm: vec![], cwd: None, ln: None, keep: false }
     }
 }
 
@@ -151,6 +152,7 @@ pub async fn run(p: &str, a: &[String], r: Rq<'_>) -> Out {
     let so = ch.stdout.take().unwrap();
     let mut se = ch.stderr.take().unwrap();
     let ln = r.ln;
+    let kp = r.keep;
     let rd = async move {
         let mut o = String::new();
         let mut l = BufReader::new(so);
@@ -165,7 +167,7 @@ pub async fn run(p: &str, a: &[String], r: Rq<'_>) -> Out {
                         f(s.trim_end());
                     }
                     o.push_str(&s);
-                    if o.len() > MAXO * 2 {
+                    if !kp && o.len() > MAXO * 2 {
                         o = o.split_off(o.len() - MAXO);
                     }
                 }
@@ -189,7 +191,7 @@ pub async fn run(p: &str, a: &[String], r: Rq<'_>) -> Out {
         (o, e, st)
     };
     match tokio::time::timeout(Duration::from_secs(r.t), w).await {
-        Ok((o, e, st)) => Out { c: st.ok().and_then(|s| s.code()).unwrap_or(-1), o: tail(&o), e },
+        Ok((o, e, st)) => Out { c: st.ok().and_then(|s| s.code()).unwrap_or(-1), o: if kp { o } else { tail(&o) }, e },
         Err(_) => {
             kill(pid);
             Out { c: -1, o: String::new(), e: format!("timeout after {} s", r.t) }
@@ -321,6 +323,14 @@ pub async fn hraw(h: &Ho, s: &str, t: u64) -> Out {
 }
 
 pub async fn hxl(a: &App, id: &str, s: &str, t: u64, ln: Option<&(dyn Fn(&str) + Send + Sync)>) -> Out {
+    hxo(a, id, s, t, ln, false).await
+}
+
+pub async fn hxk(a: &App, id: &str, s: &str, t: u64) -> Out {
+    hxo(a, id, s, t, None, true).await
+}
+
+async fn hxo(a: &App, id: &str, s: &str, t: u64, ln: Option<&(dyn Fn(&str) + Send + Sync)>, keep: bool) -> Out {
     let Some(h) = ho(a, id) else { return Out { c: -1, o: String::new(), e: format!("machine {id} is gone") } };
     let i = format!("{PRE}{s}");
     let mut v: Vec<String> = vec![];
@@ -341,7 +351,7 @@ pub async fn hxl(a: &App, id: &str, s: &str, t: u64, ln: Option<&(dyn Fn(&str) +
         }
         tool("ssh")
     };
-    let r = run(&p, &v, Rq { i: Some(i), t, ln, ..Default::default() }).await;
+    let r = run(&p, &v, Rq { i: Some(i), t, ln, keep, ..Default::default() }).await;
     if h.dk && r.c != 0 && (r.e.contains("is not running") || r.e.contains("No such container")) {
         a.lv.lock().unwrap().o.net.insert(id.into(), false);
     }

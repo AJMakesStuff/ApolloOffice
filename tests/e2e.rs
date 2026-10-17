@@ -42,8 +42,17 @@ impl Drop for K {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn full_run() {
-    let t = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("e2e-{}", std::process::id()));
+async fn public_repo() {
+    full_run(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn private_repo() {
+    full_run(true).await;
+}
+
+async fn full_run(pv: bool) {
+    let t = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("e2e-{}-{pv}", std::process::id()));
     let _ = std::fs::remove_dir_all(&t);
     std::fs::create_dir_all(&t).unwrap();
     let rm = t.join("remotes");
@@ -64,7 +73,7 @@ async fn full_run() {
     let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
     let data = t.join("data");
     let exe = env!("CARGO_BIN_EXE_apollo-office");
-    let envs = [("APOLLO_OFFICE_GH", gw.display().to_string()), ("APOLLO_OFFICE_CLAUDE", cw.display().to_string()), ("APOLLO_OFFICE_GIT", furl(&rm)), ("APOLLO_OFFICE_FAST", "1".into()), ("FAKE_GH_DIR", fk.display().to_string())];
+    let envs = [("APOLLO_OFFICE_GH", gw.display().to_string()), ("APOLLO_OFFICE_CLAUDE", cw.display().to_string()), ("APOLLO_OFFICE_REMOTE", furl(&rm)), ("APOLLO_OFFICE_FAST", "1".into()), ("FAKE_GH_DIR", fk.display().to_string()), ("FAKE_GH_PRIVATE", if pv { "1".into() } else { "0".into() })];
     let _k = K(Command::new(exe).args(["--data", &data.display().to_string(), "--port", &port.to_string(), "--quiet"]).envs(envs.iter().cloned()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap());
     std::thread::sleep(Duration::from_millis(1500));
     let l = Command::new(exe).args(["--data", &data.display().to_string(), "login-link"]).output().unwrap();

@@ -98,7 +98,7 @@ async fn call(a: &Ax, r: &Rn, n: &str, g: &Value) -> Result<String, String> {
 
 async fn wr(a: &Ax, r: &Rn, p: &str, t: &str) -> Result<(), String> {
     let b = base64::engine::general_purpose::STANDARD.encode(t.as_bytes());
-    let o = hx(a, &r.h, &format!("cd \"{}\" && mkdir -p \"$(dirname {p})\" && base64 -d > {p} <<'B64'\n{b}\nB64", r.dir, p = q(p)), 120).await;
+    let o = hx(a, &r.h, &format!("cd \"{}\" && c=; IFS=/ read -ra xs <<< {p}; for x in \"${{xs[@]}}\"; do c=\"${{c:+$c/}}$x\"; if [ -L \"$c\" ]; then echo 'path goes through a symlink' >&2; exit 9; fi; done; mkdir -p \"$(dirname {p})\" && base64 -d > {p} <<'B64'\n{b}\nB64", r.dir, p = q(p)), 120).await;
     if o.c != 0 {
         return Err(if o.e.trim().is_empty() { "write failed".into() } else { o.e });
     }

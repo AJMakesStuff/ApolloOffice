@@ -154,7 +154,7 @@ pub async fn ask(a: &Ax, o: Ask) -> R<(String, Value)> {
     };
     let rm: Vec<String> = ["CLAUDECODE", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_PID", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_EXECPATH", "CLAUDE_CODE_SESSION_ATTENDED"].into_iter().map(String::from).collect();
     let env = vec![("CLAUDE_CODE_DISABLE_AUTO_MEMORY".into(), "1".into()), ("MCP_TOOL_TIMEOUT".into(), "3600000".into()), ("DISABLE_AUTOUPDATER".into(), "1".into()), ("DISABLE_TELEMETRY".into(), "1".into())];
-    let r = run(&tool("claude"), &av, Rq { i: Some(o.p.clone()), t: o.t, env, rm, cwd: Some(e0), ln: Some(&ln) }).await;
+    let r = run(&tool("claude"), &av, Rq { i: Some(o.p.clone()), t: o.t, env, rm, cwd: Some(e0), ln: Some(&ln), keep: false }).await;
     if !tk.is_empty() {
         a.runs.lock().unwrap().remove(&tk);
     }
