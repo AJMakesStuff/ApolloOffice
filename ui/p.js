@@ -37,8 +37,6 @@
         <label>Max open PRs</label><input type="number" name="maxo" min="0" max="100" value="${r.maxo}">
         <label>Max new PRs per day</label><input type="number" name="maxd" min="0" max="100" value="${r.maxd}">
         <label>Your rules</label><textarea name="rules" placeholder="optional, e.g. only issues labeled bug; never touch the plugin API">${esc(r.rules)}</textarea>
-        <label>AI disclosure</label>${tg("ai", r.ai, "Co-Authored-By trailers and a note in the PR text")}
-        <div class="hint ai-w" ${yes(r.ai) ? "hidden" : ""} style="color:var(--bad)">Many projects require you to disclose AI-generated contributions. Turning this off can get you banned.</div>
       </div>
       <div class="acts"><button class="pri" data-op="set">Save</button><button type="button" data-op="detect">Detect test command</button><span class="sp"></span><button type="button" class="dng" data-op="del">Remove</button></div><div class="msg"></div></form>`).join("") || `<div class="empty">No repository yet.</div>`}</div>`;
     $("fa").onsubmit = async (e) => {
@@ -54,7 +52,6 @@
       n.textContent = r.ci ? `Added ${r.full}. Test command detected: ${r.ci}${r.setup ? " (setup: " + r.setup + ")" : ""}. Check it below.` : `Added ${r.full}. No test command detected, please enter one below.`;
     };
     for (const f of B.querySelectorAll("form[data-r]")) {
-      f.ai.onchange = () => { f.querySelector(".ai-w").hidden = f.ai.checked; };
       f.onsubmit = (e) => e.preventDefault();
       f.onclick = async (e) => {
         const b = e.target.closest("button[data-op]");

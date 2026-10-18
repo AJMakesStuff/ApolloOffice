@@ -66,8 +66,8 @@ Options: `--port` (default 47300), `--data <folder>`.
 ## AI disclosure
 
 Every commit carries `Co-Authored-By` trailers for the models that worked on
-it, and every PR text says it was generated with AI by ApolloOffice. You can
-turn this off per repository, but many projects require it.
+it, and every PR text says it was generated with AI by ApolloOffice. This is
+always on: many projects require it, and hiding it can get you banned.
 
 ## License
 

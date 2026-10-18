@@ -229,7 +229,7 @@ async fn api(a: &Ax, m: &Method, p: &str, q: &str, b: Value) -> Response<Body> {
                     js(json!({"full": r, "ci": c, "setup": s, "cfg": cfg(a)}))
                 }
                 "set" => {
-                    for (k, kind) in [("iss", 0), ("hunt", 0), ("ai", 0), ("on_", 0), ("maxo", 1), ("maxd", 1), ("ci", 2), ("setup", 2), ("rules", 2), ("mode", 2)] {
+                    for (k, kind) in [("iss", 0), ("hunt", 0), ("on_", 0), ("maxo", 1), ("maxd", 1), ("ci", 2), ("setup", 2), ("rules", 2), ("mode", 2)] {
                         let v = &b[k];
                         if v.is_null() {
                             continue;

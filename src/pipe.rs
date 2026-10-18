@@ -175,10 +175,6 @@ fn trs(j: &Job) -> Vec<String> {
 
 pub const FOOT: &str = "🤖 Generated with AI by [ApolloOffice](https://github.com/Silvertree2010/ApolloOffice), see the Co-Authored-By trailers for the models";
 
-fn ai(a: &Ax, j: &Job) -> bool {
-    rp(a, &j.repo)["ai"].as_i64().unwrap_or(1) == 1
-}
-
 fn kill(a: &Ax, j: &Job) -> R<()> {
     if a.db.kg(&format!("kill:{}", j.id)).as_bool().unwrap_or(false) {
         return drop("dropped by the owner");
@@ -918,7 +914,7 @@ async fn tmpl(r: &str) -> Option<String> {
 async fn mkbody(a: &Ax, j: &mut Job) -> R<()> {
     let f = j.d["f"].clone();
     let ci = rp(a, &j.repo)["ci"].as_str().unwrap_or("").to_string();
-    let ft = ai(a, j);
+    let ft = true;
     let mut b = body(j, &f, &ci, ft);
     if j.kind == "fix" {
         if let Some(t) = tmpl(&j.repo).await {
@@ -954,7 +950,7 @@ async fn submit(a: &Ax, j: &mut Job) -> R<(String, i64)> {
     a.flow("reviewer", "submit", &j.tag());
     need(a, "submit", &["gh", &j.h()]).await?;
     let f = j.d["f"].clone();
-    let ft = ai(a, j);
+    let ft = true;
     let tr = if ft { trs(j) } else { vec![] };
     let ti = j.d["pt"].as_str().map(String::from).filter(|x| !x.trim().is_empty()).unwrap_or(f["title"].as_str().unwrap_or(&j.title).to_string());
     if j.kind == "fix" && !j.d["sq"].as_bool().unwrap_or(false) {
