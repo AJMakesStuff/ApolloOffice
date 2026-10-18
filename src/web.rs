@@ -61,6 +61,10 @@ pub fn link_new(a: &crate::db::Db) -> String {
 
 const LP: &str = "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>ApolloOffice</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0b0c0e;color:#ecebe6;font:14px/1.5 ui-monospace,Menlo,Consolas,monospace}div{max-width:420px;padding:24px}button{font:inherit;color:#0b0c0e;background:#ecebe6;border:0;border-radius:6px;padding:8px 16px;cursor:pointer}code{color:#4fb3e0}</style><div>";
 
+fn esc(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&#39;")
+}
+
 fn page(b: &str) -> Response<Body> {
     rs(StatusCode::OK, "text/html; charset=utf-8", format!("{LP}{b}</div>"))
 }
@@ -117,7 +121,7 @@ async fn checks(a: &Ax) -> Value {
 }
 
 fn cfg(a: &Ax) -> Value {
-    json!({"repos": a.db.all("select * from rp order by full", pa![]), "hosts": a.db.all("select * from hs order by id='local' desc, id", pa![]), "set": a.set(), "data": a.dd.display().to_string(), "auto": crate::sys::autostart_on()})
+    json!({"repos": a.db.all("select * from rp order by full", pa![]), "hosts": a.db.all("select * from hs order by id='local' desc, id", pa![]), "set": a.set(), "data": a.dd.display().to_string(), "auto": crate::sys::autostart_on(), "prov": crate::prov::status(a), "google": crate::goog::linked(a)["email"], "upd": a.db.kg("upd"), "asset": crate::upd::asset()})
 }
 
 fn rid(s: &str) -> Option<String> {
@@ -309,7 +313,7 @@ async fn api(a: &Ax, m: &Method, p: &str, q: &str, b: Value) -> Response<Body> {
             if let Some(m) = b["md"].as_object() {
                 for (k, v) in m {
                     if let Some(x) = v.as_str() {
-                        if regex::Regex::new(r"^[A-Za-z0-9._:\[\]-]{0,80}$").unwrap().is_match(x.trim()) {
+                        if regex::Regex::new(r"^[A-Za-z0-9._:/\[\]-]{0,120}$").unwrap().is_match(x.trim()) {
                             s["md"][k] = json!(x.trim());
                         }
                     }
@@ -320,6 +324,18 @@ async fn api(a: &Ax, m: &Method, p: &str, q: &str, b: Value) -> Response<Body> {
             }
             if let Some(x) = b["hunters"].as_i64() {
                 s["hunters"] = json!(x.clamp(0, 12));
+            }
+            if let Some(x) = b["updates"].as_bool() {
+                s["updates"] = json!(x);
+            }
+            if let Some(x) = b["octx"].as_i64() {
+                s["prov"]["ollama"]["ctx"] = json!(x.clamp(2048, 1_048_576));
+            }
+            if let Some(x) = b["ollama"].as_str() {
+                let x = x.trim();
+                if x.is_empty() || x.starts_with("http://") || x.starts_with("https://") {
+                    s["prov"]["ollama"]["base"] = json!(x);
+                }
             }
             if let Some(x) = b["tokday"].as_i64() {
                 s["tokday"] = json!(x.max(0));
@@ -341,6 +357,52 @@ async fn api(a: &Ax, m: &Method, p: &str, q: &str, b: Value) -> Response<Body> {
             }
             js(cfg(a))
         }
+        ("POST", "/api/prov") => {
+            let id = b["id"].as_str().unwrap_or("");
+            let Some(p) = crate::prov::pv(id) else { return er(StatusCode::BAD_REQUEST, "unknown provider") };
+            if let Some(k) = b["key"].as_str() {
+                if !p.key {
+                    return er(StatusCode::BAD_REQUEST, "this provider has no API key");
+                }
+                if let Err(e) = crate::vault::put(a, id, k.trim()) {
+                    return er(StatusCode::INTERNAL_SERVER_ERROR, &e);
+                }
+            }
+            js(cfg(a))
+        }
+        ("GET", "/api/models") => match crate::prov::models(a, &qv("p")).await {
+            Ok(v) => js(json!({"ms": v})),
+            Err(e) => js(json!({"ms": [], "error": e})),
+        },
+        ("POST", "/api/test") => {
+            let md = b["md"].as_str().unwrap_or("").to_string();
+            match crate::prov::test(a, &md).await {
+                Ok(t) => js(json!({"ok": true, "m": t})),
+                Err(e) => js(json!({"ok": false, "m": crate::wk::errm(&e)})),
+            }
+        }
+        ("POST", "/api/google") => match b["op"].as_str().unwrap_or("") {
+            "link" => js(json!({"url": crate::goog::start(a, "link")})),
+            "unlink" => {
+                a.db.kd("google");
+                js(cfg(a))
+            }
+            _ => er(StatusCode::BAD_REQUEST, "unknown op"),
+        },
+        ("POST", "/api/update") => match b["op"].as_str().unwrap_or("") {
+            "check" => match crate::upd::check(a).await {
+                Ok(v) => js(json!({"ok": true, "r": v, "cfg": cfg(a)})),
+                Err(e) => js(json!({"ok": false, "m": e, "cfg": cfg(a)})),
+            },
+            "apply" => {
+                if !crate::upd::ready(a) {
+                    return er(StatusCode::CONFLICT, "no update downloaded");
+                }
+                crate::upd::apply(a);
+                js(json!({"ok": true}))
+            }
+            _ => er(StatusCode::BAD_REQUEST, "unknown op"),
+        },
         _ => er(StatusCode::NOT_FOUND, "not found"),
     }
 }
@@ -359,6 +421,35 @@ pub async fn h(State(a): State<Ax>, req: Request<Body>) -> Response<Body> {
     }
     if !host_ok(&a, &hd) {
         return er(StatusCode::MISDIRECTED_REQUEST, "use http://127.0.0.1");
+    }
+    if p == "/auth/google" && m == Method::GET {
+        if crate::goog::linked(&a)["sub"].is_null() {
+            return page("No Google account is connected yet. Log in with <code>apollo-office login-link</code>, then connect Google in Settings.");
+        }
+        return Response::builder().status(StatusCode::SEE_OTHER).header("location", crate::goog::start(&a, "login")).header("cache-control", "no-store").body(Body::empty()).unwrap();
+    }
+    if p == "/auth/google/cb" && m == Method::GET {
+        let qv = |k: &str| q.split('&').find_map(|x| x.strip_prefix(&format!("{k}="))).map(|v| v.replace("%2F", "/").replace("%2f", "/")).unwrap_or_default();
+        if !qv("error").is_empty() {
+            return page("Google sign-in was cancelled. <a href='/'>Back</a>");
+        }
+        return match crate::goog::back(&a, &qv("code"), &qv("state")).await {
+            Ok((md, sub, em)) if md == "link" => {
+                crate::goog::link(&a, &sub, &em);
+                a.say("scout", &format!("Google account {em} connected for sign-in"), None);
+                rs(StatusCode::OK, "text/html; charset=utf-8", format!("{LP}<meta http-equiv=refresh content='1;url=/'><p>Connected <b>{}</b>. You can now sign in with this Google account.</p></div>", esc(&em)))
+            }
+            Ok((_, sub, em)) => {
+                if !crate::goog::ok(&a, &sub) {
+                    return page(&format!("<b>{}</b> is not the Google account connected to this ApolloOffice. <a href='/'>Back</a>", esc(&em)));
+                }
+                let s = hex::encode(rand::random::<[u8; 32]>());
+                a.db.run("delete from ses where exp<?", pa![now()]);
+                a.db.run("insert into ses(id,exp) values(?,?)", pa![s.clone(), now() + 30 * 86_400_000]);
+                Response::builder().status(StatusCode::OK).header("content-type", "text/html; charset=utf-8").header("cache-control", "no-store").header("set-cookie", format!("ao={s}; HttpOnly; SameSite=Strict; Path=/; Max-Age={}", 30 * 86400)).body(Body::from(format!("{LP}<meta http-equiv=refresh content='0;url=/'><p>Signed in as {}.</p></div>", esc(&em)))).unwrap()
+            }
+            Err(e) => page(&format!("{} <a href='/'>Back</a>", esc(&e))),
+        };
     }
     if p == "/auth/link" {
         let c = q.split('&').find_map(|x| x.strip_prefix("c=")).unwrap_or("").to_string();
@@ -401,7 +492,8 @@ pub async fn h(State(a): State<Ax>, req: Request<Body>) -> Response<Body> {
     }
     let f = if p == "/" { "index.html".to_string() } else { p.trim_start_matches('/').to_string() };
     if f == "index.html" && !authed(&a, &hd) {
-        return page("<p><b>ApolloOffice</b></p><p>Not logged in. In a terminal, run</p><p><code>apollo-office login-link</code></p><p>and open the link it prints.</p>");
+        let g = if crate::goog::linked(&a)["sub"].is_string() { "<p><a href='/auth/google'><button>Sign in with Google</button></a></p><p>or, in a terminal, run</p>" } else { "<p>Not logged in. In a terminal, run</p>" };
+        return page(&format!("<p><b>ApolloOffice</b></p>{g}<p><code>apollo-office login-link</code></p><p>and open the link it prints.</p>"));
     }
     match Ui::get(&f) {
         Some(x) => rs(StatusCode::OK, mime_guess::from_path(&f).first_or_octet_stream().as_ref(), x.data.into_owned()),

@@ -52,7 +52,7 @@ pub async fn guard(a: &Ax, xs: Vec<(String, String)>, from: &str, job: Option<i6
     Ok(r)
 }
 
-fn errm(e: &X) -> String {
+pub fn errm(e: &X) -> String {
     match e {
         X::Lim(m) => format!("usage limit: {m}"),
         X::Net(m) => format!("network: {m}"),

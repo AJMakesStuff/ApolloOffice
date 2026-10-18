@@ -122,7 +122,7 @@ async fn full_run(pv: bool) {
     assert!(pb.starts_with("Fixes #1"), "{pb}");
     assert!(pb.contains("`adds two numbers`: fails on `main` without the fix"), "{pb}");
     assert!(pb.contains("`bash t/run.sh` passes."), "{pb}");
-    assert!(pb.contains("Generated with [Claude Code]"), "{pb}");
+    assert!(pb.contains("Generated with AI by [ApolloOffice]"), "{pb}");
     assert!(j["df"].as_str().unwrap().contains("+add() { echo $(( $1 + $2 )); }"), "{}", j["df"]);
     let r = post("/api/act", json!({"a": "approve", "id": jid, "pt": "Make add sum its arguments"})).await;
     assert!(r["error"].is_null(), "{r}");

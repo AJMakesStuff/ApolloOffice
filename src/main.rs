@@ -2,12 +2,16 @@ mod ai;
 mod app;
 mod db;
 mod gh;
+mod goog;
 mod mcp;
 mod net;
 mod ntf;
 mod pipe;
+mod prov;
 mod sh;
 mod sys;
+mod upd;
+mod vault;
 mod web;
 mod wk;
 
@@ -85,6 +89,7 @@ async fn main() -> anyhow::Result<()> {
         }
         _ => {}
     }
+    upd::cleanup(&me);
     let d = open(&dd)?;
     d.ks("port", &serde_json::json!(a.port));
     let l = match tokio::net::TcpListener::bind(("127.0.0.1", a.port)).await {
@@ -105,7 +110,25 @@ async fn main() -> anyhow::Result<()> {
     if !a.quiet {
         println!("\n  ApolloOffice {}\n\n  Open {}\n\n  Data: {}\n  Stop with Ctrl+C\n", app::V, url(&ax.db, a.port), dd.display());
     }
+    upd::spawn(ax.clone());
     let r = axum::Router::new().fallback(web::h).with_state(ax.clone());
-    axum::serve(l, r).with_graceful_shutdown(async { let _ = tokio::signal::ctrl_c().await; }).await?;
+    let q = ax.clone();
+    axum::serve(l, r)
+        .with_graceful_shutdown(async move {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = q.quit.notified() => {}
+            }
+        })
+        .await?;
+    if *ax.restart.lock().unwrap() {
+        match upd::install(&ax) {
+            Ok(()) => upd::relaunch(&ax.me),
+            Err(e) => {
+                eprintln!("update failed: {e}");
+                upd::relaunch(&ax.me)
+            }
+        }
+    }
     Ok(())
 }

@@ -27,7 +27,7 @@ fn pw(p: &str) -> Result<String, String> {
     Ok(s)
 }
 
-fn defs() -> Vec<(&'static str, &'static str, Value)> {
+pub fn defs() -> Vec<(&'static str, &'static str, Value)> {
     vec![
         ("read", "Read a file in the repo (path relative to repo root). Returns numbered lines.", json!({"type": "object", "properties": {"path": {"type": "string"}, "from": {"type": "number"}, "n": {"type": "number"}}, "required": ["path"]})),
         ("write", "Create or overwrite a file in the repo with the given text.", json!({"type": "object", "properties": {"path": {"type": "string"}, "text": {"type": "string"}}, "required": ["path", "text"]})),
@@ -38,7 +38,7 @@ fn defs() -> Vec<(&'static str, &'static str, Value)> {
     ]
 }
 
-async fn call(a: &Ax, r: &Rn, n: &str, g: &Value) -> Result<String, String> {
+pub async fn call(a: &Ax, r: &Rn, n: &str, g: &Value) -> Result<String, String> {
     let d = &r.dir;
     let s = |k: &str| g[k].as_str().unwrap_or("").to_string();
     match n {

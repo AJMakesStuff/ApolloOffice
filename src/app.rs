@@ -70,6 +70,10 @@ pub struct App {
     pub cache: Mutex<HashMap<String, (i64, Value)>>,
     pub vtk: Mutex<HashSet<i64>>,
     pub sw: tokio::sync::Notify,
+    pub vk: Mutex<Option<[u8; 32]>>,
+    pub quit: tokio::sync::Notify,
+    pub restart: Mutex<bool>,
+    pub oa: Mutex<HashMap<String, (String, String, i64)>>,
 }
 
 pub type Ax = Arc<App>;
@@ -129,7 +133,9 @@ pub fn dset() -> Value {
         "hunters": 2,
         "tokday": 0,
         "ntfy": "",
-        "discord": ""
+        "discord": "",
+        "updates": true,
+        "prov": {}
     })
 }
 
@@ -157,6 +163,10 @@ impl App {
             cache: Mutex::new(HashMap::new()),
             vtk: Mutex::new(HashSet::new()),
             sw: tokio::sync::Notify::new(),
+            vk: Mutex::new(None),
+            quit: tokio::sync::Notify::new(),
+            restart: Mutex::new(false),
+            oa: Mutex::new(HashMap::new()),
         }
     }
 

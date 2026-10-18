@@ -1,4 +1,4 @@
-use crate::ai::{ask, mname, p as P, wrap, Ask};
+use crate::ai::{ask, p as P, wrap, Ask};
 use crate::app::{drop, e, sl, Ax, Rn, X, R};
 use crate::db::{now, Job};
 use crate::net::need;
@@ -169,11 +169,11 @@ fn use_(a: &Ax, j: &mut Job, md: &str) {
 }
 
 fn trs(j: &Job) -> Vec<String> {
-    let ms: BTreeSet<String> = j.d["ms"].as_array().cloned().unwrap_or_default().iter().filter_map(|x| x.as_str().map(mname)).collect();
-    ms.into_iter().map(|m| format!("Co-Authored-By: {m} <noreply@anthropic.com>")).collect()
+    let ms: BTreeSet<String> = j.d["ms"].as_array().cloned().unwrap_or_default().iter().filter_map(|x| x.as_str().map(|m| format!("Co-Authored-By: {} <{}>", crate::prov::name(m), crate::prov::mail(m)))).collect();
+    ms.into_iter().collect()
 }
 
-pub const FOOT: &str = "🤖 Generated with [Claude Code](https://claude.com/claude-code) by ApolloOffice";
+pub const FOOT: &str = "🤖 Generated with AI by [ApolloOffice](https://github.com/Silvertree2010/ApolloOffice), see the Co-Authored-By trailers for the models";
 
 fn ai(a: &Ax, j: &Job) -> bool {
     rp(a, &j.repo)["ai"].as_i64().unwrap_or(1) == 1
@@ -292,7 +292,7 @@ async fn repro(a: &Ax, j: &mut Job) -> R<()> {
     for md in ms {
         a.st("repro", "work", Some(j.id), "");
         use_(a, j, &md);
-        a.say("repro", &format!("{} reproducing {}", mname(&md), j.tag()), Some(j.id));
+        a.say("repro", &format!("{} reproducing {}", crate::prov::name(&md), j.tag()), Some(j.id));
         let mut o = Ask::new("repro", md, P("repro"), p.clone());
         o.job = Some(j.id);
         o.rn = rn(a, j);
@@ -317,7 +317,7 @@ async fn repro(a: &Ax, j: &mut Job) -> R<()> {
 
 async fn run_t(a: &Ax, j: &Job, at: &str, c: &str) -> (i32, String) {
     let l = format!("/tmp/ao-t-{}.log", j.id);
-    let r = x(a, j, &format!("rm -f {l}; if git checkout -q {} 2>&1; then {{ to 3600 bash -c {}\n}} > {l} 2>&1; e=$?; tail -c 30000 {l}; else e=125; echo \"[checkout failed]\"; git status --short 2>&1 | head -20; fi; echo \"[exit $e]\"", q(at), q(c)), 3700).await;
+    let r = x(a, j, &format!("rm -f {l}; if git checkout -q {} 2>&1; then {{ to 3600 bash -c {}\n}} > {l} 2>&1; e=$?; tail -c 30000 {l}; git checkout -q -f -- . 2>/dev/null; git clean -fdq 2>/dev/null; else e=125; echo \"[checkout failed]\"; git status --short 2>&1 | head -20; fi; echo \"[exit $e]\"", q(at), q(c)), 3700).await;
     let e = Regex::new(r"\[exit (\d+)\]\s*$").unwrap().captures(&r.o).and_then(|m| m[1].parse::<i32>().ok()).unwrap_or(-1);
     (e, r.o)
 }
@@ -428,7 +428,7 @@ async fn cirun(a: &Ax, j: &Job, at: Option<&str>) -> (i32, String) {
         Some(s) => format!("git checkout -q {} && ", q(s)),
         None => String::new(),
     };
-    let r = hxl(a, &j.h(), &format!("cd \"{}\" && {co}{{ to {CIT} bash -c {}\n}} 2>&1; echo \"[exit $?]\"", dir(a, j), q(&c)), CIT + 120, Some(&ln)).await;
+    let r = hxl(a, &j.h(), &format!("cd \"{}\" && {co}{{ to {CIT} bash -c {}\n}} 2>&1; e=$?; git checkout -q -f -- . 2>/dev/null; git clean -fdq 2>/dev/null; echo \"[exit $e]\"", dir(a, j), q(&c)), CIT + 120, Some(&ln)).await;
     a.lv.lock().unwrap().cil.remove(&id);
     let o = r.o;
     let e = Regex::new(r"\[exit (\d+)\]\s*$").unwrap().captures(&o).and_then(|m| m[1].parse::<i32>().ok()).unwrap_or(if r.c == 0 { -1 } else { r.c });

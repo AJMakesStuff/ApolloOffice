@@ -28,6 +28,7 @@
     watcher: { body: "#4fb3e0", dark: "#2f86b0", light: "#8fd2f0" },
   };
   const NM = { hunter: "Hunter", scout: "Scout", guard: "Guard", vet: "Vet", repro: "Repro", fixer: "Fixer", ci: "CI", reviewer: "Reviewer", submit: "Submit", watcher: "Watcher" };
+  window.AO.NM = NM;
   const ORD = ["scout", "guard", "vet", "watcher", "hunter", "repro", "fixer", "ci", "reviewer", "submit"];
 
   const VW = 400, VH = 258;
@@ -348,18 +349,31 @@
   const kt = (n) => (n > 999999 ? (n / 1e6).toFixed(1) + "M" : n > 999 ? Math.round(n / 1000) + "k" : String(n));
   const STC = { approve: "ok", ready: "", vet: "", repro: "work", fix: "work", ci: "work", review: "work", gate: "work", submit: "work", done: "ok", drop: "bad" };
 
+  const GEAR = `<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path fill="currentColor" d="M9.4 1l.3 1.8c.4.1.8.3 1.1.5l1.5-1 1.4 1.4-1 1.5c.2.3.4.7.5 1.1L15 6.6v2l-1.8.3c-.1.4-.3.8-.5 1.1l1 1.5-1.4 1.4-1.5-1c-.3.2-.7.4-1.1.5L9.4 15h-2l-.3-1.8c-.4-.1-.8-.3-1.1-.5l-1.5 1-1.4-1.4 1-1.5c-.2-.3-.4-.7-.5-1.1L1.8 8.6v-2l1.8-.3c.1-.4.3-.8.5-1.1l-1-1.5 1.4-1.4 1.5 1c.3-.2.7-.4 1.1-.5L7.4 1h2zM8.4 5.6a2 2 0 100 4 2 2 0 000-4z"/></svg>`;
+  window.AO.GEAR = GEAR;
+  const mdn = (md) => {
+    if (!md) return "";
+    const i = md.indexOf(":"), p = i > 0 ? md.slice(0, i) : "", m = ["codex", "anthropic", "openai", "gemini", "ollama"].includes(p) ? md.slice(i + 1) : md;
+    const c = m.includes("haiku") ? "Haiku" : m.includes("sonnet") ? "Sonnet" : m.includes("opus") ? "Opus" : m.split("/").pop();
+    return p === "ollama" ? c + " · local" : p === "codex" ? c + " · ChatGPT" : p === "anthropic" ? c + " · API" : c;
+  };
   const tiles = () => {
     const el = $("tiles");
     if (!el.children.length) {
-      el.innerHTML = ORD.map((n) => `<div class="tile" data-w="${n}"><div class="hd"><span class="dot" style="background:${SK[n].body}"></span>${NM[n]}<span class="md"></span></div><div class="sy"></div><div class="stt"></div><div class="ft"></div></div>`).join("");
-      el.onclick = (e) => { const t = e.target.closest(".tile"); if (t) post({ a: "hold", w: t.dataset.w, on: !S.w[t.dataset.w].hold }).then(apply); };
+      el.innerHTML = ORD.map((n) => `<div class="tile" data-w="${n}"><div class="hd"><span class="dot" style="background:${SK[n].body}"></span>${NM[n]}<span class="md"></span>${n === "ci" || n === "submit" ? "" : `<button class="gear" title="Model and provider" aria-label="${NM[n]} settings">${GEAR}</button>`}</div><div class="sy"></div><div class="stt"></div><div class="ft"></div></div>`).join("");
+      el.onclick = (e) => {
+        const g = e.target.closest(".gear");
+        if (g) { e.stopPropagation(); window.AO.role && window.AO.role(g.closest(".tile").dataset.w); return; }
+        const t = e.target.closest(".tile"); if (t) post({ a: "hold", w: t.dataset.w, on: !S.w[t.dataset.w].hold }).then(apply);
+      };
     }
     const STG = { hunter: ["hunt"], repro: ["repro"], fixer: ["fix"], ci: ["ci"], reviewer: ["review"], submit: ["gate", "submit"] };
     for (const t of el.children) {
       const n = t.dataset.w, w = S.w[n] || { st: "idle", say: "", md: "", tk: 0 };
       const cn = STG[n] ? S.q.filter((q) => STG[n].includes(q.st)).length : n === "vet" ? S.o.vn || 0 : 0;
       const wk = cn > 0 || w.st === "work";
-      t.querySelector(".md").textContent = n === "ci" || n === "submit" ? "no model" : w.md ? (w.md.includes("haiku") ? "Haiku" : w.md.includes("sonnet") ? "Sonnet" : w.md.includes("opus") ? "Opus" : w.md) : "";
+      t.querySelector(".md").textContent = n === "ci" || n === "submit" ? "no model" : mdn(w.md);
+      t.querySelector(".md").title = w.md || "";
       t.querySelector(".sy").textContent = w.say || "…";
       t.className = "tile " + (wk ? "work" : "") + (w.hold ? " hold" : "");
       t.querySelector(".stt").textContent = w.hold ? "paused" : wk ? "work" + (cn > 1 ? " ×" + cn : "") : w.st === "sleep" ? "sleep" : "idle";

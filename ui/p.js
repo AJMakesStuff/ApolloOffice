@@ -129,37 +129,108 @@
     }
   };
 
-  const ROLES = [["scout", "Scout"], ["guard", "Guard"], ["vet", "Vet"], ["watcher", "Watcher"], ["repro", "Repro (first try)"], ["repro2", "Repro (second try)"], ["fixer", "Fixer"], ["hunter", "Hunter"], ["reviewer", "Reviewer"], ["big", "Complex bugs"]];
+  const RK = { scout: [["scout", "Model"]], guard: [["guard", "Model"]], vet: [["vet", "Model"]], watcher: [["watcher", "Model"]], hunter: [["hunter", "Model"]], reviewer: [["reviewer", "Model"]], repro: [["repro", "First try"], ["repro2", "Second try"]], fixer: [["fixer", "Model"], ["big", "Complex bugs"]] };
+  const TOOLS = ["hunter", "repro", "fixer"];
+  const split = (v) => { const i = (v || "").indexOf(":"), p = i > 0 ? v.slice(0, i) : ""; return cfg.prov.some((x) => x.id === p) ? [p, v.slice(i + 1)] : ["cc", v || ""]; };
+  const join = (p, m) => (p === "cc" ? m : p + ":" + m);
+
+  const role = async (w) => {
+    cfg = await get("/api/cfg");
+    show((window.AO.NM?.[w] || w) + " · model", "role");
+    const s = cfg.set, ks = RK[w];
+    const popt = (sel) => cfg.prov.map((p) => `<option value="${p.id}" ${p.id === sel ? "selected" : ""}>${esc(p.nm)}${p.has ? "" : " (no key yet)"}</option>`).join("");
+    B.innerHTML = `<form id="fr">${ks.map(([k, l]) => { const [p, m] = split(s.md[k]); return `<div class="sec"><h4>${esc(l)}</h4><div class="box" data-k="${k}"><div class="fm" style="margin:0">
+        <label>Provider</label><select data-p>${popt(p)}</select>
+        <label>Model</label><input type="text" data-m list="dl-${k}" value="${esc(m)}" placeholder="model id"><datalist id="dl-${k}"></datalist>
+        <div class="hint" data-h></div>
+      </div><div class="acts"><button type="button" data-t>Test</button></div><div class="msg" data-r></div></div></div>`; }).join("")}
+      ${w === "fixer" ? `<div class="sec"><div class="box">${tg("big", s.big, "use the complex-bug model for Repro and Fixer when Vet marks a bug complex")}</div></div>` : ""}
+      ${TOOLS.includes(w) ? `<div class="msg">This worker reads and edits code with tools. Small local models often fail here; a strong model saves time and tokens.</div>` : ""}
+      <div class="acts"><button class="pri">Save</button></div><div class="msg" id="rm"></div></form>`;
+    for (const bx of B.querySelectorAll(".box[data-k]")) {
+      const ps = bx.querySelector("[data-p]"), mi = bx.querySelector("[data-m]"), dl = bx.querySelector("datalist"), h = bx.querySelector("[data-h]");
+      const fill = async (reset) => {
+        const pv = cfg.prov.find((x) => x.id === ps.value);
+        h.textContent = !pv.has ? "Add the API key for this provider in Settings first." : pv.id === "ollama" ? "Runs on " + pv.base : pv.cli ? "Uses the CLI login on this computer." : "";
+        dl.innerHTML = pv.ms.map((m) => `<option value="${esc(m)}">`).join("");
+        if (reset) mi.value = pv.ms[0] || "";
+        if (!pv.has) return;
+        const r = await get("/api/models?p=" + pv.id);
+        if (r.ms?.length) { dl.innerHTML = r.ms.map((m) => `<option value="${esc(m)}">`).join(""); if (reset && !mi.value) mi.value = r.ms[0]; }
+        else if (r.error) h.textContent = "Could not list models: " + r.error;
+      };
+      ps.onchange = () => fill(true);
+      fill(false);
+      bx.querySelector("[data-t]").onclick = async (e) => {
+        const b = e.target, m = bx.querySelector("[data-r]");
+        busy(b, true, "Testing…"); m.className = "msg"; m.textContent = "";
+        const r = await post({ md: join(ps.value, mi.value.trim()) }, "/api/test");
+        busy(b, false, "Test");
+        m.className = r.ok ? "msg" : "msg bad2"; m.textContent = r.ok ? "Answer: " + r.m : r.m;
+      };
+    }
+    $("fr").onsubmit = async (e) => {
+      e.preventDefault();
+      const md = {};
+      for (const bx of B.querySelectorAll(".box[data-k]")) md[bx.dataset.k] = join(bx.querySelector("[data-p]").value, bx.querySelector("[data-m]").value.trim());
+      const body = { md };
+      const bg = $("fr").querySelector("[name=big]");
+      if (bg) body.big = bg.checked;
+      const r = await post(body, "/api/set");
+      $("rm").className = r.error ? "msg bad2" : "msg";
+      $("rm").textContent = r.error || "Saved.";
+    };
+  };
+  A.role = role;
+
   const settings = async () => {
     cfg = await get("/api/cfg");
     show("Settings", "set");
-    const s = cfg.set;
+    const s = cfg.set, u = cfg.upd || {};
+    const keys = cfg.prov.filter((p) => p.key);
+    const ol = cfg.prov.find((p) => p.id === "ollama");
+    const ust = u.ready && u.ready !== A.S?.v ? `Update ${esc(u.ready)} is downloaded.` : u.err ? `Last check: ${esc(u.err)}` : u.latest ? `Latest release: ${esc(u.latest)}` : "Not checked yet.";
     B.innerHTML = `<form id="fs">
-      <div class="sec"><h4>Models</h4><div class="box"><div class="fm" style="margin:0">${ROLES.map(([k, l]) => `<label>${l}</label><input type="text" data-md="${k}" value="${esc(s.md[k])}">`).join("")}
-        <label>Complex bugs</label>${tg("big", s.big, "use the complex-bug model for Repro and Fixer when Vet marks a bug complex")}</div></div></div>
+      <div class="sec"><h4>Providers</h4><div class="box"><div class="fm" style="margin:0">
+        ${keys.map((p) => `<label>${esc(p.nm)}</label><input type="password" autocomplete="off" data-key="${p.id}" placeholder="${p.has ? "saved · type to replace, clear with a single space" : "API key"}">`).join("")}
+        <label>Ollama address</label><input type="text" name="ollama" value="${esc(s.prov?.ollama?.base || "")}" placeholder="${esc(ol.dbase)}">
+        <label>Ollama context</label><input type="number" name="octx" min="2048" step="1024" value="${s.prov?.ollama?.ctx || 32768}"><div class="hint">Tokens per request. Ollama's default of 4096 is too small for the workers.</div>
+        <div class="hint">Keys are stored encrypted on this computer. Claude Code and Codex use their own CLI logins. Pick a provider per worker with the gear on its card.</div>
+      </div></div></div>
+      <div class="sec"><h4>Sign in</h4><div class="box">${cfg.google ? `<div class="ck"><b class="ok2">Google</b> ${esc(cfg.google)} can sign in.</div><div class="acts"><button type="button" class="dng" id="gu">Disconnect Google</button></div>` : `<div class="ck">Sign in with a one-time link from <code>apollo-office login-link</code>, or connect a Google account.</div><div class="acts"><button type="button" id="gl">Connect Google account</button></div>`}</div></div>
       <div class="sec"><h4>Work</h4><div class="box"><div class="fm" style="margin:0">
         <label>Hunters</label><input type="number" name="hunters" min="0" max="12" value="${s.hunters}"><div class="hint">How many bug hunts may run at once (only in repos with hunting on).</div>
-        <label>Daily token limit</label><input type="number" name="tokday" min="0" value="${s.tokday}"><div class="hint">0 = no limit. The office always pauses when Claude reports a usage limit.</div>
+        <label>Daily token limit</label><input type="number" name="tokday" min="0" value="${s.tokday}"><div class="hint">0 = no limit. The office always pauses when a provider reports a usage limit.</div>
       </div></div></div>
       <div class="sec"><h4>Notifications</h4><div class="box"><div class="fm" style="margin:0">
         <label>ntfy topic URL</label><input type="text" name="ntfy" value="${esc(s.ntfy)}" placeholder="https://ntfy.sh/your-secret-topic">
         <label>Discord webhook</label><input type="text" name="discord" value="${esc(s.discord)}" placeholder="https://discord.com/api/webhooks/…">
       </div><div class="acts"><button type="button" id="bt">Send test</button></div></div></div>
+      <div class="sec"><h4>Updates</h4><div class="box">${tg("updates", s.updates, "install updates automatically when the office is idle")}<div class="msg" id="um">${ust}</div><div class="acts"><button type="button" id="uc">Check now</button>${u.ready && u.ready !== A.S?.v ? `<button type="button" class="pri" id="ua">Install and restart</button>` : ""}</div></div></div>
       <div class="sec"><h4>This installation</h4><div class="box"><div class="fm" style="margin:0">
         <label>Start at login</label>${tg("auto", cfg.auto, "start ApolloOffice when I log in")}
         <label>Data folder</label><span class="mono" style="font-size:12px;word-break:break-all">${esc(cfg.data)}</span>
-        <label>Version</label><span class="mono" style="font-size:12px">${esc(A.S?.v || "")}</span>
+        <label>Version</label><span class="mono" style="font-size:12px">${esc(A.S?.v || "")} · ${esc(cfg.asset)}</span>
       </div></div></div>
       <div class="acts"><button class="pri">Save</button></div><div class="msg" id="sm"></div></form>`;
     const send = async (test) => {
-      const f = $("fs"), v = fv(f), md = {};
-      for (const e of f.querySelectorAll("[data-md]")) md[e.dataset.md] = e.value;
-      const r = await post({ md, big: v.big, hunters: v.hunters, tokday: v.tokday, ntfy: v.ntfy, discord: v.discord, auto: v.auto, test }, "/api/set");
-      $("sm").className = r.error ? "msg bad2" : "msg";
-      $("sm").textContent = r.error || (test ? "Saved and test sent." : "Saved.");
+      const f = $("fs"), v = fv(f);
+      for (const e of f.querySelectorAll("[data-key]")) {
+        if (!e.value) continue;
+        const r = await post({ id: e.dataset.key, key: e.value.trim() }, "/api/prov");
+        if (r.error) { $("sm").className = "msg bad2"; $("sm").textContent = r.error; return; }
+      }
+      const r = await post({ hunters: v.hunters, tokday: v.tokday, ntfy: v.ntfy, discord: v.discord, auto: v.auto, updates: v.updates, ollama: v.ollama, octx: v.octx, test }, "/api/set");
+      if (r.error) { $("sm").className = "msg bad2"; $("sm").textContent = r.error; return; }
+      await settings();
+      $("sm").textContent = test ? "Saved and test sent." : "Saved.";
     };
     $("fs").onsubmit = (e) => { e.preventDefault(); send(false); };
     $("bt").onclick = () => send(true);
+    if ($("gl")) $("gl").onclick = async () => { const r = await post({ op: "link" }, "/api/google"); if (r.url) location.href = r.url; };
+    if ($("gu")) $("gu").onclick = async (e) => { if (e.target.dataset.sure !== "1") { e.target.dataset.sure = "1"; e.target.textContent = "Click again to disconnect"; return; } await post({ op: "unlink" }, "/api/google"); settings(); };
+    $("uc").onclick = async (e) => { busy(e.target, true, "Checking…"); const r = await post({ op: "check" }, "/api/update"); await settings(); $("um").textContent = r.ok ? (r.r.new ? `Update ${r.r.latest} downloaded.` : `Up to date (latest ${r.r.latest}).`) : r.m; };
+    if ($("ua")) $("ua").onclick = async (e) => { busy(e.target, true, "Restarting…"); await post({ op: "apply" }, "/api/update"); setTimeout(() => location.reload(), 6000); };
   };
 
   const job = async (id) => {
@@ -212,6 +283,7 @@
 
   $("bRepos").onclick = repos;
   $("bHosts").onclick = hosts;
+  $("bSet").innerHTML = A.GEAR;
   $("bSet").onclick = settings;
   let asked = false;
   A.onState = (s) => {
