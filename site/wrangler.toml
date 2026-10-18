@@ -1,0 +1,7 @@
+name = "apollo-office-site"
+compatibility_date = "2026-10-01"
+routes = [{ pattern = "office.apollonet.dev", custom_domain = true }]
+
+[assets]
+directory = "./public"
+html_handling = "drop-trailing-slash"

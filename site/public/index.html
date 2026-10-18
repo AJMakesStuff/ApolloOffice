@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ApolloOffice</title>
+<meta name="description" content="A small office of AI workers that turns GitHub issues into verified pull requests, on your own computer.">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+<nav><a class="brand" href="/">ApolloOffice</a><a href="https://github.com/Silvertree2010/ApolloOffice">GitHub</a><a href="/privacy">Privacy</a></nav>
+<h1>Bug fixes that prove themselves.</h1>
+<p class="lede">ApolloOffice is a small office of AI workers on your own computer. Add a GitHub repository and it picks up bug reports, reproduces them, writes a fix with a regression test and opens a pull request once the proof holds.</p>
+<a class="btn" href="https://github.com/Silvertree2010/ApolloOffice/releases/latest">Download</a><a class="alt" href="https://github.com/Silvertree2010/ApolloOffice#readme">Read the README</a>
+<img src="/office.jpg" alt="The ApolloOffice dashboard: a pixel office with one desk per worker, the queue, pull requests and the log" width="1600" height="900">
+<p class="muted">The office at work: every worker has its own desk.</p>
+<h2>How it works</h2>
+<ul>
+<li>A fixed pipeline: Scout, Guard, Vet, Hunter, Repro, Fixer, CI, Reviewer, Submit and Watcher.</li>
+<li>ApolloOffice checks the proof itself: the new test fails without the fix, passes with it, and your test command stays green.</li>
+<li>Every pull request waits for your approval, with the diff, the proof and an editable text.</li>
+<li>Pick a provider per worker: Claude Code or Codex with your own login, the Claude, OpenAI or Gemini API, or a local model through Ollama.</li>
+</ul>
+<h2>Runs on your machine</h2>
+<p>One binary for Windows, macOS and Linux. It uses your own GitHub and AI accounts and runs repository code in Docker on your computer or on any machine you reach with <code>ssh</code>. There is no ApolloOffice server, no account with us and no telemetry.</p>
+<footer><span>ApolloOffice, AGPL-3.0</span><a href="/privacy">Privacy policy</a><a href="https://github.com/Silvertree2010/ApolloOffice">Source</a></footer>
+</div>
+</body>
+</html>
