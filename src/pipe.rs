@@ -197,6 +197,8 @@ fn bslug(j: &Job) -> String {
     }
 }
 
+const ART: &[&str] = &[".venv/", "venv/", "__pycache__/", "*.pyc", ".pytest_cache/", ".mypy_cache/", ".ruff_cache/", ".tox/", ".coverage", "node_modules/", ".next/", ".turbo/", "target/", ".gradle/"];
+
 async fn prep(a: &Ax, j: &mut Job) -> R<()> {
     need(a, "repro", &[&j.h(), "gh"]).await?;
     if j.d["rp"].as_bool().unwrap_or(false) {
@@ -236,6 +238,7 @@ async fn prep(a: &Ax, j: &mut Job) -> R<()> {
         }
     }
     pull(a, j, &url, &mn, &format!("refs/remotes/origin/{mn}")).await?;
+    ok(a, j, &format!("mkdir -p .git/info && printf '%s\\n' {} > .git/info/exclude", ART.iter().map(|x| q(x)).collect::<Vec<_>>().join(" ")), 60).await?;
     let me = crate::gh::me(a).await.map_err(X::E)?;
     ok(a, j, &format!("git config user.name {} && git config user.email {}", q(me["name"].as_str().unwrap_or("")), q(me["mail"].as_str().unwrap_or(""))), 60).await?;
     let br = if j.kind == "fix" || j.kind == "hunt" { bslug(j) } else { j.s("branch") };
