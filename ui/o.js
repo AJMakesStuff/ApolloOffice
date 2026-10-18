@@ -411,6 +411,8 @@
     const a = S.n;
     $("cQ").innerHTML = `vet <b>${a.vet || 0}</b> · ready <b>${a.ready || 0}</b> · approve <b>${a.approve || 0}</b> · done <b>${a.done || 0}</b>`;
     $("bPause").textContent = o.man ? "Resume office" : "Pause office";
+    $("ban").hidden = !S.star;
+    document.body.classList.toggle("sb", !!S.star);
   };
 
   const apply = (s) => { if (!s || s.error) return; S = s; last = performance.now(); err = 0; tiles(); lists(); chips(); window.AO.S = s; window.AO.onState && window.AO.onState(s); };
@@ -427,6 +429,8 @@
     if (jb) { e.preventDefault(); window.AO.job && window.AO.job(Number(jb.dataset.j)); }
   });
   $("bPause").onclick = () => post({ a: "pause", on: !S.o.man }).then(apply);
+  $("bStar").onclick = (e) => { e.target.disabled = true; post({ op: "star" }, "/api/star").then((r) => { e.target.disabled = false; if (r.error) { e.target.textContent = "Could not star, try again"; return; } apply(r); }); };
+  $("bLater").onclick = () => post({ op: "later" }, "/api/star").then(apply);
 
   const poll = async () => {
     try { apply(await get("/api/state")); } catch {

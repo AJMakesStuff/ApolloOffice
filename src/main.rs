@@ -9,6 +9,7 @@ mod ntf;
 mod pipe;
 mod prov;
 mod sh;
+mod star;
 mod sys;
 mod upd;
 mod vault;
@@ -111,6 +112,7 @@ async fn main() -> anyhow::Result<()> {
         println!("\n  ApolloOffice {}\n\n  Open {}\n\n  Data: {}\n  Stop with Ctrl+C\n", app::V, url(&ax.db, a.port), dd.display());
     }
     upd::spawn(ax.clone());
+    star::spawn(ax.clone());
     let r = axum::Router::new().fallback(web::h).with_state(ax.clone());
     let q = ax.clone();
     axum::serve(l, r)

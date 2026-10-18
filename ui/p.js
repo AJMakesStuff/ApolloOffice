@@ -36,6 +36,8 @@
         <label>Pull requests</label><select name="mode"><option value="ask" ${r.mode !== "auto" ? "selected" : ""}>wait for my approval</option><option value="auto" ${r.mode === "auto" ? "selected" : ""}>submit automatically</option></select>
         <label>Max open PRs</label><input type="number" name="maxo" min="0" max="100" value="${r.maxo}">
         <label>Max new PRs per day</label><input type="number" name="maxd" min="0" max="100" value="${r.maxd}">
+        <label>PR footer</label>${tg("nm", r.nm ?? 1, "mention ApolloOffice with a link")}
+        <div class="hint">The AI note and the Co-Authored-By trailers are always added.</div>
         <label>Your rules</label><textarea name="rules" placeholder="optional, e.g. only issues labeled bug; never touch the plugin API">${esc(r.rules)}</textarea>
       </div>
       <div class="acts"><button class="pri" data-op="set">Save</button><button type="button" data-op="detect">Detect test command</button><span class="sp"></span><button type="button" class="dng" data-op="del">Remove</button></div><div class="msg"></div></form>`).join("") || `<div class="empty">No repository yet.</div>`}</div>`;

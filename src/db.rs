@@ -23,6 +23,10 @@ create table if not exists seen(repo text, num int, upd text, primary key(repo, 
 create table if not exists cm(id text primary key, t int);
 ";
 
+fn mig(c: &Connection) {
+    let _ = c.execute("alter table rp add column nm int default 1", []);
+}
+
 pub type P = Vec<Box<dyn ToSql + Send>>;
 
 #[macro_export]
@@ -44,6 +48,7 @@ impl Db {
     pub fn open(f: &Path) -> anyhow::Result<Db> {
         let c = Connection::open(f)?;
         c.execute_batch(SCH)?;
+        mig(&c);
         Ok(Db(Arc::new(Mutex::new(c))))
     }
 
@@ -51,6 +56,7 @@ impl Db {
     pub fn mem() -> Db {
         let c = Connection::open_in_memory().unwrap();
         c.execute_batch(SCH).unwrap();
+        mig(&c);
         Db(Arc::new(Mutex::new(c)))
     }
 

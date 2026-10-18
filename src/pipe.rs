@@ -174,6 +174,15 @@ fn trs(j: &Job) -> Vec<String> {
 }
 
 pub const FOOT: &str = "🤖 Generated with AI by [ApolloOffice](https://github.com/Silvertree2010/ApolloOffice), see the Co-Authored-By trailers for the models";
+pub const FOOT0: &str = "🤖 Generated with AI, see the Co-Authored-By trailers for the models";
+
+fn fo(a: &Ax, j: &Job) -> &'static str {
+    if rp(a, &j.repo)["nm"].as_i64().unwrap_or(1) == 1 {
+        FOOT
+    } else {
+        FOOT0
+    }
+}
 
 fn kill(a: &Ax, j: &Job) -> R<()> {
     if a.db.kg(&format!("kill:{}", j.id)).as_bool().unwrap_or(false) {
@@ -546,7 +555,7 @@ fn san(s: &str) -> String {
     Regex::new(r"(?i)\bissue\s+#0\b").unwrap().replace_all(&r, "this bug").trim().to_string()
 }
 
-pub fn body(j: &Job, f: &Value, ci: &str, ft: bool) -> String {
+pub fn body(j: &Job, f: &Value, ci: &str, ft: &str) -> String {
     let g = |k: &str| {
         let s = f[k].as_str().unwrap_or("").to_string();
         if j.hunt() {
@@ -581,8 +590,8 @@ pub fn body(j: &Job, f: &Value, ci: &str, ft: bool) -> String {
     if !u.trim().is_empty() {
         v.extend([String::new(), "## Not changed".into(), u]);
     }
-    if ft {
-        v.extend([String::new(), FOOT.into()]);
+    if !ft.is_empty() {
+        v.extend([String::new(), ft.into()]);
     }
     v.join("\n").trim().to_string()
 }
@@ -600,7 +609,7 @@ async fn review(a: &Ax, j: &mut Job, f: &mut Value) -> R<String> {
         wrap("issue", &format!("{}\n\n{}", j.title, crate::sh::head(&j.s("body"), 4000))),
         if j.kind == "review" { format!("{}\n\n", wrap("request", &j.s("change"))) } else { String::new() },
         f["title"].as_str().unwrap_or(""),
-        body(j, f, &ci, false),
+        body(j, f, &ci, ""),
         rules(a, j)
     );
     let md = a.md("reviewer");
@@ -914,13 +923,13 @@ async fn tmpl(r: &str) -> Option<String> {
 async fn mkbody(a: &Ax, j: &mut Job) -> R<()> {
     let f = j.d["f"].clone();
     let ci = rp(a, &j.repo)["ci"].as_str().unwrap_or("").to_string();
-    let ft = true;
+    let ft = fo(a, j);
     let mut b = body(j, &f, &ci, ft);
     if j.kind == "fix" {
         if let Some(t) = tmpl(&j.repo).await {
             a.say("submit", "repo has a PR template, filling it in", Some(j.id));
             let md = a.md("reviewer");
-            let mut o = Ask::new("submit", md, P("desc"), format!("Fill in this repository's pull request template for the change below. Keep the template's headings and checklist structure. Tick a checkbox only when the facts below prove it (tests added, tests pass, CI command passes, linked issue). Remove instructions and HTML comments that are meant for the author. Put the facts into the matching sections; if a fact has no section, keep it in a section at the end. Use only the facts given, never invent. Answer only with JSON {{\"body\": \"the filled template in Markdown\"}}.\n\n{}\n\nFacts (our PR text):\n{}", wrap("template", &crate::sh::head(&t, 8000)), body(j, &f, &ci, false)));
+            let mut o = Ask::new("submit", md, P("desc"), format!("Fill in this repository's pull request template for the change below. Keep the template's headings and checklist structure. Tick a checkbox only when the facts below prove it (tests added, tests pass, CI command passes, linked issue). Remove instructions and HTML comments that are meant for the author. Put the facts into the matching sections; if a fact has no section, keep it in a section at the end. Use only the facts given, never invent. Answer only with JSON {{\"body\": \"the filled template in Markdown\"}}.\n\n{}\n\nFacts (our PR text):\n{}", wrap("template", &crate::sh::head(&t, 8000)), body(j, &f, &ci, "")));
             o.job = Some(j.id);
             o.ef = Some("low");
             if let Ok((_, js)) = ask(a, o).await {
@@ -929,8 +938,8 @@ async fn mkbody(a: &Ax, j: &mut Job) -> R<()> {
                     if j.hunt() {
                         b = san(&b);
                     }
-                    if ft && !b.contains(FOOT) {
-                        b = format!("{b}\n\n{FOOT}");
+                    if !b.contains(ft) {
+                        b = format!("{b}\n\n{ft}");
                     }
                 }
             }
@@ -950,8 +959,8 @@ async fn submit(a: &Ax, j: &mut Job) -> R<(String, i64)> {
     a.flow("reviewer", "submit", &j.tag());
     need(a, "submit", &["gh", &j.h()]).await?;
     let f = j.d["f"].clone();
-    let ft = true;
-    let tr = if ft { trs(j) } else { vec![] };
+    let ft = fo(a, j);
+    let tr = trs(j);
     let ti = j.d["pt"].as_str().map(String::from).filter(|x| !x.trim().is_empty()).unwrap_or(f["title"].as_str().unwrap_or(&j.title).to_string());
     if j.kind == "fix" && !j.d["sq"].as_bool().unwrap_or(false) {
         let rf = if j.hunt() || j.num == 0 { format!("Found while testing {}", j.d["hunt"]["where"].as_str().unwrap_or("")) } else { format!("Fixes #{}", j.num) };
@@ -970,7 +979,7 @@ async fn submit(a: &Ax, j: &mut Job) -> R<(String, i64)> {
     if Regex::new(r"#0\b").unwrap().is_match(&pb) || Regex::new(r"#0\b").unwrap().is_match(&msg) {
         return drop("PR text or commit still references #0, not pushing");
     }
-    if ft && (j.kind != "rebase" || !j.s("fx").is_empty()) && (!tr.iter().all(|t| msg.contains(t)) || j.kind == "fix" && !pb.contains(FOOT)) {
+    if (j.kind != "rebase" || !j.s("fx").is_empty()) && (!tr.iter().all(|t| msg.contains(t)) || j.kind == "fix" && !pb.contains(ft)) {
         return drop("AI disclosure missing (Co-Authored-By trailer or footer), not pushing");
     }
     if std::env::var("APOLLO_OFFICE_DRY").map(|v| v == "1").unwrap_or(false) || j.d["dry"].as_bool().unwrap_or(false) {
@@ -1608,13 +1617,14 @@ mod t {
     fn bodies() {
         let j = Job::of(json!({"id": 5, "repo": "o/r", "num": 12, "kind": "fix", "title": "T", "d": {"mn": "main", "known": []}}));
         let f = json!({"cause": "c", "fix": "f", "tests": ["t1"], "test_cmd": "cargo test t1", "untouched": ""});
-        let b = body(&j, &f, "cargo test", true);
+        let b = body(&j, &f, "cargo test", FOOT);
         assert!(b.starts_with("Fixes #12"));
         assert!(b.contains("`t1`: fails on `main`"));
         assert!(b.ends_with(FOOT));
-        assert!(!body(&j, &f, "cargo test", false).contains(FOOT));
+        assert!(!body(&j, &f, "cargo test", "").contains(FOOT));
+        assert!(body(&j, &f, "cargo test", FOOT0).ends_with(FOOT0) && !FOOT0.contains("ApolloOffice"));
         let h = Job::of(json!({"id": 6, "repo": "o/r", "num": 0, "kind": "fix", "title": "T", "d": {"mn": "main", "hunt": {"where": "a.rs:3", "title": "x"}}}));
-        let b = body(&h, &json!({"cause": "Fixes #0. c", "fix": "f", "tests": ["a", "b"], "test_cmd": "t"}), "make test", true);
+        let b = body(&h, &json!({"cause": "Fixes #0. c", "fix": "f", "tests": ["a", "b"], "test_cmd": "t"}), "make test", FOOT);
         assert!(b.starts_with("Found while testing `a.rs:3`"));
         assert!(!b.contains("#0"));
         assert!(b.contains("Regression tests `a`, `b`: fail on"));

@@ -99,6 +99,7 @@ fn state(a: &Ax) -> Value {
         "n": Value::Object(a.db.all("select st, count(*) n from jobs group by st", pa![]).into_iter().map(|x| (x["st"].as_str().unwrap_or("").to_string(), x["n"].clone())).collect()),
         "lm": if now() - lm["t"].as_i64().unwrap_or(0) < 180_000 { lm } else { Value::Null },
         "nr": a.db.n("select count(*) from rp", pa![]),
+        "star": crate::star::show(a),
     })
 }
 
@@ -229,7 +230,7 @@ async fn api(a: &Ax, m: &Method, p: &str, q: &str, b: Value) -> Response<Body> {
                     js(json!({"full": r, "ci": c, "setup": s, "cfg": cfg(a)}))
                 }
                 "set" => {
-                    for (k, kind) in [("iss", 0), ("hunt", 0), ("on_", 0), ("maxo", 1), ("maxd", 1), ("ci", 2), ("setup", 2), ("rules", 2), ("mode", 2)] {
+                    for (k, kind) in [("iss", 0), ("hunt", 0), ("nm", 0), ("on_", 0), ("maxo", 1), ("maxd", 1), ("ci", 2), ("setup", 2), ("rules", 2), ("mode", 2)] {
                         let v = &b[k];
                         if v.is_null() {
                             continue;
@@ -386,6 +387,17 @@ async fn api(a: &Ax, m: &Method, p: &str, q: &str, b: Value) -> Response<Body> {
             "unlink" => {
                 a.db.kd("google");
                 js(cfg(a))
+            }
+            _ => er(StatusCode::BAD_REQUEST, "unknown op"),
+        },
+        ("POST", "/api/star") => match b["op"].as_str().unwrap_or("") {
+            "star" => match crate::star::star(a).await {
+                Ok(()) => js(state(a)),
+                Err(e) => er(StatusCode::BAD_GATEWAY, &e),
+            },
+            "later" => {
+                crate::star::later(a);
+                js(state(a))
             }
             _ => er(StatusCode::BAD_REQUEST, "unknown op"),
         },

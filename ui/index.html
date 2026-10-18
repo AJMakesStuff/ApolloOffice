@@ -65,6 +65,9 @@ button.ic svg { width: 14px; height: 14px; }
 .tile .stt { position: absolute; bottom: 6px; left: 9px; font: 10px var(--m); color: var(--t3); text-transform: uppercase; }
 .tile.work .stt { color: var(--t1); }
 .tile.hold { opacity: .55; }
+body.sb { grid-template-rows: auto auto auto minmax(0, 1fr); }
+.ban { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; border: 1px solid var(--l); border-radius: var(--r); background: var(--p); color: var(--t2); font: 12px/1.3 var(--m); min-width: 0; }
+.ban span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 main { display: grid; grid-template-columns: minmax(0, 1fr) clamp(300px, 28vw, 420px); gap: 10px; min-height: 0; }
 .stage { background: var(--p); border: 1px solid var(--l); border-radius: var(--r); overflow: hidden; min-height: 0; min-width: 0; display: flex; align-items: center; justify-content: center; position: relative; }
 .mg { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); width: min(560px, 80%); background: var(--p); border: 1px solid var(--ok); border-radius: var(--r); padding: 12px 16px; animation: mgin .35s cubic-bezier(.2,.9,.3,1.2); }
@@ -137,7 +140,7 @@ pre.df .ad { color: var(--ok); } pre.df .rm { color: var(--bad); } pre.df .hh { 
 .empty { color: var(--t3); font: 12px var(--m); padding: 4px 0; }
 @media (prefers-color-scheme: light) { button.go, button.pri { color: #fff; } button.pri:hover { background: #000; } }
 @media (max-width: 1100px) { .tiles { grid-template-columns: repeat(5, minmax(0, 1fr)); } .tile { height: 56px; } .tile .sy { -webkit-line-clamp: 1; } }
-@media (max-width: 860px) { body { grid-template-rows: auto auto minmax(0, 1.1fr); } main { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); } .side { grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0, 1fr); } .side .card:last-child { display: none; } .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } #cQ, #cHo { display: none; } }
+@media (max-width: 860px) { body { grid-template-rows: auto auto minmax(0, 1.1fr); } body.sb { grid-template-rows: auto auto auto minmax(0, 1.1fr); } main { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); } .side { grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0, 1fr); } .side .card:last-child { display: none; } .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } #cQ, #cHo { display: none; } }
 </style>
 </head>
 <body>
@@ -152,6 +155,7 @@ pre.df .ad { color: var(--ok); } pre.df .rm { color: var(--bad); } pre.df .hh { 
   <button id="bSet" class="ic" title="Settings" aria-label="Settings"></button>
   <button id="bPause">Pause office</button>
 </header>
+<div class="ban" id="ban" hidden><span>Enjoying ApolloOffice? A star on GitHub helps other people find it.</span><span class="sp"></span><button class="go" id="bStar">Star on GitHub</button><button id="bLater">Later</button></div>
 <div class="tiles" id="tiles"></div>
 <main>
   <div class="stage" id="stage"><canvas id="cv" width="400" height="258"></canvas><div class="mg" id="mg" hidden></div></div>
