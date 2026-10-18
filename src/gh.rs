@@ -141,14 +141,15 @@ pub fn pick_ci(names: &[String], pkg: Option<&str>, mk: Option<&str>, xtask: boo
         return ("go test ./...".into(), String::new());
     }
     if has("pyproject.toml") || has("pytest.ini") || has("setup.py") || has("setup.cfg") || has("tox.ini") {
+        let e = if has("pyproject.toml") || has("setup.py") { " -e ." } else { "" };
         let i = if has("requirements-dev.txt") {
-            "python3 -m venv .venv && . .venv/bin/activate && pip install -q -r requirements-dev.txt -e ."
+            format!("python3 -m venv .venv && . .venv/bin/activate && pip install -q -r requirements-dev.txt{e}")
         } else if has("requirements.txt") {
-            "python3 -m venv .venv && . .venv/bin/activate && pip install -q pytest -r requirements.txt -e ."
+            format!("python3 -m venv .venv && . .venv/bin/activate && pip install -q pytest -r requirements.txt{e}")
         } else {
-            "python3 -m venv .venv && . .venv/bin/activate && pip install -q pytest -e ."
+            format!("python3 -m venv .venv && . .venv/bin/activate && pip install -q pytest{e}")
         };
-        return (". .venv/bin/activate && pytest".into(), i.into());
+        return (". .venv/bin/activate && pytest".into(), i);
     }
     if has("Makefile") && mk.map(|m| m.lines().any(|l| l.starts_with("test:"))).unwrap_or(false) {
         return ("make test".into(), String::new());
@@ -186,6 +187,8 @@ mod t {
         assert_eq!(pick_ci(&n(&["package.json"]), Some(r#"{"scripts":{"test":"echo \"Error: no test specified\" && exit 1"}}"#), None, false).0, "");
         assert_eq!(pick_ci(&n(&["go.mod"]), None, None, false).0, "go test ./...");
         assert!(pick_ci(&n(&["pyproject.toml"]), None, None, false).0.ends_with("pytest"));
+        assert!(pick_ci(&n(&["pyproject.toml"]), None, None, false).1.ends_with(" -e ."));
+        assert!(pick_ci(&n(&["pytest.ini", "requirements.txt"]), None, None, false).1.ends_with("-r requirements.txt"));
         assert_eq!(pick_ci(&n(&["Makefile"]), None, Some("all:\n\ttrue\ntest:\n\t./t.sh\n"), false).0, "make test");
         assert_eq!(pick_ci(&n(&["README.md"]), None, None, false).0, "");
     }
