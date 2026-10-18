@@ -178,12 +178,7 @@ pub async fn run(p: &str, a: &[String], r: Rq<'_>) -> Out {
     let re = async move {
         let mut b = Vec::new();
         let _ = se.read_to_end(&mut b).await;
-        let s = String::from_utf8_lossy(&b).to_string();
-        if s.len() > MAXO {
-            s[s.len() - MAXO..].to_string()
-        } else {
-            s
-        }
+        last(&String::from_utf8_lossy(&b), MAXO)
     };
     let w = async {
         let (o, e) = tokio::join!(rd, re);
@@ -418,4 +413,15 @@ pub async fn apip(p: &str) -> Result<Vec<Value>, String> {
     let o = gh(&["api", "--paginate", "--slurp", "-H", "Accept: application/vnd.github+json", p], 180).await?;
     let v: Value = serde_json::from_str(&o).map_err(|e| format!("gh json: {e}"))?;
     Ok(v.as_array().cloned().unwrap_or_default().into_iter().flat_map(|x| x.as_array().cloned().unwrap_or_default()).collect())
+}
+
+#[cfg(test)]
+mod t {
+    use super::*;
+
+    #[tokio::test]
+    async fn utf8_stderr() {
+        let r = run(&bash(), &["-c".into(), "printf a >&2; printf '€%.0s' {1..200000} >&2".into()], Rq { t: 30, ..Default::default() }).await;
+        assert!(r.e.len() <= MAXO && r.e.ends_with('€'));
+    }
 }
