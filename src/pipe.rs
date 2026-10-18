@@ -1435,6 +1435,9 @@ async fn pick(a: &Ax, h: &str) -> Option<i64> {
         if pin && d["h"].as_str().map(|x| x != h).unwrap_or(false) {
             continue;
         }
+        if !pin && crate::sh::ho(a, h).map(|x| x.skips(&r)).unwrap_or(false) {
+            continue;
+        }
         let rr = rp(a, &r);
         if rr["on_"].as_i64().unwrap_or(0) != 1 && !pin {
             continue;

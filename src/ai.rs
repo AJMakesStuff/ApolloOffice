@@ -110,6 +110,22 @@ fn reg(a: &Ax, rn: &Rn) -> (String, std::path::PathBuf) {
     (tk, tf)
 }
 
+pub async fn cctok(a: &Ax) -> R<Option<String>> {
+    let t = crate::vault::get(a, "cc").map_err(X::E)?;
+    if !t.is_empty() {
+        return Ok(Some(t));
+    }
+    let kc = a.set()["prov"]["cc"]["kc"].as_str().unwrap_or("").trim().to_string();
+    if kc.is_empty() {
+        return Ok(None);
+    }
+    let r = run("security", &["find-generic-password".into(), "-s".into(), kc.clone(), "-w".into()], Rq { t: 15, ..Default::default() }).await;
+    if r.c != 0 || r.o.trim().is_empty() {
+        return Err(X::E(format!("Claude Code token not found in keychain item {kc}")));
+    }
+    Ok(Some(r.o.trim().to_string()))
+}
+
 async fn cc(a: &Ax, o: Ask) -> R<(String, Value)> {
     let e0 = a.dd.join("empty");
     let _ = std::fs::create_dir_all(&e0);
@@ -173,7 +189,17 @@ async fn cc(a: &Ax, o: Ask) -> R<(String, Value)> {
         }
     };
     let rm: Vec<String> = ["CLAUDECODE", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_PID", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_EXECPATH", "CLAUDE_CODE_SESSION_ATTENDED"].into_iter().map(String::from).collect();
-    let env = vec![("CLAUDE_CODE_DISABLE_AUTO_MEMORY".into(), "1".into()), ("MCP_TOOL_TIMEOUT".into(), "3600000".into()), ("DISABLE_AUTOUPDATER".into(), "1".into()), ("DISABLE_TELEMETRY".into(), "1".into())];
+    let mut env = vec![("CLAUDE_CODE_DISABLE_AUTO_MEMORY".into(), "1".into()), ("MCP_TOOL_TIMEOUT".into(), "3600000".into()), ("DISABLE_AUTOUPDATER".into(), "1".into()), ("DISABLE_TELEMETRY".into(), "1".into())];
+    match cctok(a).await {
+        Ok(Some(t)) => env.push(("CLAUDE_CODE_OAUTH_TOKEN".into(), t)),
+        Ok(None) => {}
+        Err(e) => {
+            if !tk.is_empty() {
+                a.runs.lock().unwrap().remove(&tk);
+            }
+            return Err(e);
+        }
+    }
     let r = run(&tool("claude"), &av, Rq { i: Some(o.p.clone()), t: o.t, env, rm, cwd: Some(e0), ln: Some(&ln), keep: false }).await;
     if !tk.is_empty() {
         a.runs.lock().unwrap().remove(&tk);

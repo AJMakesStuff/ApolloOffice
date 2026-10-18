@@ -25,6 +25,8 @@ create table if not exists cm(id text primary key, t int);
 
 fn mig(c: &Connection) {
     let _ = c.execute("alter table rp add column nm int default 1", []);
+    let _ = c.execute("alter table hs add column no text default ''", []);
+    let _ = c.execute("alter table hs add column cpu int default 0", []);
 }
 
 pub type P = Vec<Box<dyn ToSql + Send>>;

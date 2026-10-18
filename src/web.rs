@@ -241,7 +241,7 @@ async fn api(a: &Ax, m: &Method, p: &str, q: &str, b: Value) -> Response<Body> {
                                 a.db.run(&format!("update rp set {k}=? where full=?"), pa![x, r.clone()]);
                             }
                             1 => {
-                                let x = v.as_i64().unwrap_or(3).clamp(0, 100);
+                                let x = v.as_i64().unwrap_or(3).clamp(0, 10000);
                                 a.db.run(&format!("update rp set {k}=? where full=?"), pa![x, r.clone()]);
                             }
                             _ => {
@@ -286,7 +286,8 @@ async fn api(a: &Ax, m: &Method, p: &str, q: &str, b: Value) -> Response<Body> {
                     if !dk && !b["raw"].as_bool().unwrap_or(false) {
                         return er(StatusCode::BAD_REQUEST, "without Docker the workers run repository code directly on this machine; confirm that first");
                     }
-                    a.db.run("insert into hs(id,ssh,dk,ln,ci,gb,raw,on_,t0) values(?,?,?,?,?,?,?,?,?) on conflict(id) do update set ssh=excluded.ssh, dk=excluded.dk, ln=excluded.ln, ci=excluded.ci, gb=excluded.gb, raw=excluded.raw, on_=excluded.on_", pa![id.clone(), ssh, dk as i64, b["ln"].as_i64().unwrap_or(1).clamp(1, 8), b["ci"].as_i64().unwrap_or(1).clamp(1, 8), b["gb"].as_i64().unwrap_or(50).clamp(5, 10000), (!dk) as i64, b["on"].as_bool().unwrap_or(true) as i64, now()]);
+                    let no = crate::sh::head(b["no"].as_str().unwrap_or("").trim(), 2000);
+                    a.db.run("insert into hs(id,ssh,dk,ln,ci,gb,raw,on_,t0,no,cpu) values(?,?,?,?,?,?,?,?,?,?,?) on conflict(id) do update set ssh=excluded.ssh, dk=excluded.dk, ln=excluded.ln, ci=excluded.ci, gb=excluded.gb, raw=excluded.raw, on_=excluded.on_, no=excluded.no, cpu=excluded.cpu", pa![id.clone(), ssh, dk as i64, b["ln"].as_i64().unwrap_or(1).clamp(1, 8), b["ci"].as_i64().unwrap_or(1).clamp(1, 8), b["gb"].as_i64().unwrap_or(50).clamp(5, 10000), (!dk) as i64, b["on"].as_bool().unwrap_or(true) as i64, now(), no, b["cpu"].as_i64().unwrap_or(0).clamp(0, 256)]);
                     a.db.kd(&format!("up:{id}"));
                     match crate::sh::ensure(a, &id).await {
                         Ok(()) => {
@@ -329,6 +330,11 @@ async fn api(a: &Ax, m: &Method, p: &str, q: &str, b: Value) -> Response<Body> {
             if let Some(x) = b["updates"].as_bool() {
                 s["updates"] = json!(x);
             }
+            if let Some(x) = b["cckc"].as_str() {
+                if regex::Regex::new(r"^[A-Za-z0-9._ -]{0,100}$").unwrap().is_match(x.trim()) {
+                    s["prov"]["cc"]["kc"] = json!(x.trim());
+                }
+            }
             if let Some(x) = b["octx"].as_i64() {
                 s["prov"]["ollama"]["ctx"] = json!(x.clamp(2048, 1_048_576));
             }
@@ -362,7 +368,7 @@ async fn api(a: &Ax, m: &Method, p: &str, q: &str, b: Value) -> Response<Body> {
             let id = b["id"].as_str().unwrap_or("");
             let Some(p) = crate::prov::pv(id) else { return er(StatusCode::BAD_REQUEST, "unknown provider") };
             if let Some(k) = b["key"].as_str() {
-                if !p.key {
+                if !p.key && id != "cc" {
                     return er(StatusCode::BAD_REQUEST, "this provider has no API key");
                 }
                 if let Err(e) = crate::vault::put(a, id, k.trim()) {

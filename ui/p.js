@@ -34,8 +34,8 @@
         <label>Setup command</label><input type="text" name="setup" value="${esc(r.setup)}" placeholder="optional, e.g. npm ci">
         <div class="hint">Runs before every job, after checkout.</div>
         <label>Pull requests</label><select name="mode"><option value="ask" ${r.mode !== "auto" ? "selected" : ""}>wait for my approval</option><option value="auto" ${r.mode === "auto" ? "selected" : ""}>submit automatically</option></select>
-        <label>Max open PRs</label><input type="number" name="maxo" min="0" max="100" value="${r.maxo}">
-        <label>Max new PRs per day</label><input type="number" name="maxd" min="0" max="100" value="${r.maxd}">
+        <label>Max open PRs</label><input type="number" name="maxo" min="0" max="10000" value="${r.maxo}">
+        <label>Max new PRs per day</label><input type="number" name="maxd" min="0" max="10000" value="${r.maxd}">
         <label>PR footer</label>${tg("nm", r.nm ?? 1, "mention ApolloOffice with a link")}
         <div class="hint">The AI note and the Co-Authored-By trailers are always added.</div>
         <label>Your rules</label><textarea name="rules" placeholder="optional, e.g. only issues labeled bug; never touch the plugin API">${esc(r.rules)}</textarea>
@@ -94,6 +94,8 @@
         <div class="hint raw" ${h.dk === 0 ? "" : "hidden"}><span style="color:var(--bad)">Workers build and run code from the repositories you add, directly with your user account, which can reach your GitHub, Claude and SSH logins on this machine. Only do this for repositories you trust.</span><br>${tg("raw", h.dk === 0 && !nw, "I understand")}</div>
         <label>Parallel jobs</label><input type="number" name="ln" min="1" max="8" value="${h.ln || 1}">
         <label>Parallel test runs</label><input type="number" name="ci" min="1" max="8" value="${h.ci || 1}">
+        <label>CPU limit</label><input type="number" name="cpu" min="0" value="${h.cpu || 0}"><div class="hint">Cores for the Docker container. 0 = all but one.</div>
+        <label>Skip repos</label><input type="text" name="no" value="${esc(h.no || "")}" placeholder="optional, e.g. owner/big-repo, other-repo"><div class="hint">Repositories this machine never builds, for example because they are too large for it.</div>
         <label>Disk limit (GB)</label><input type="number" name="gb" min="5" value="${h.gb || 50}">
         <div class="hint">Old clones and build folders are deleted above this, or when less than 20 GB are free.</div>
       </div>
@@ -116,7 +118,7 @@
           return hosts();
         }
         const ex = hs.find((x) => x.id === id);
-        const body = { op: "set", id, ssh: v.ssh ?? ex?.ssh ?? "", dk: v.dk === "1", raw: !!v.raw, ln: v.ln, ci: v.ci, gb: v.gb, on: v.on ?? true };
+        const body = { op: "set", id, ssh: v.ssh ?? ex?.ssh ?? "", dk: v.dk === "1", raw: !!v.raw, ln: v.ln, ci: v.ci, gb: v.gb, cpu: v.cpu, no: v.no, on: v.on ?? true };
         busy(b, true, body.dk ? "Setting up Docker (first time takes several minutes)…" : "Checking…");
         m.className = "msg"; m.textContent = "";
         const r = await post(body, "/api/host");
@@ -192,6 +194,9 @@
     B.innerHTML = `<form id="fs">
       <div class="sec"><h4>Providers</h4><div class="box"><div class="fm" style="margin:0">
         ${keys.map((p) => `<label>${esc(p.nm)}</label><input type="password" autocomplete="off" data-key="${p.id}" placeholder="${p.has ? "saved · type to replace, clear with a single space" : "API key"}">`).join("")}
+        <label>Claude Code token</label><input type="password" autocomplete="off" data-key="cc" placeholder="${cfg.prov.find((p) => p.id === "cc").tok ? "saved · type to replace, clear with a single space" : "optional, from claude setup-token"}">
+        <label>or keychain item</label><input type="text" name="cckc" value="${esc(s.prov?.cc?.kc || "")}" placeholder="optional, macOS keychain service name">
+        <div class="hint">Without a token Claude Code uses its own login on this computer.</div>
         <label>Ollama address</label><input type="text" name="ollama" value="${esc(s.prov?.ollama?.base || "")}" placeholder="${esc(ol.dbase)}">
         <label>Ollama context</label><input type="number" name="octx" min="2048" step="1024" value="${s.prov?.ollama?.ctx || 32768}"><div class="hint">Tokens per request. Ollama's default of 4096 is too small for the workers.</div>
         <div class="hint">Keys are stored encrypted on this computer. Claude Code and Codex use their own CLI logins. Pick a provider per worker with the gear on its card.</div>
@@ -219,7 +224,7 @@
         const r = await post({ id: e.dataset.key, key: e.value.trim() }, "/api/prov");
         if (r.error) { $("sm").className = "msg bad2"; $("sm").textContent = r.error; return; }
       }
-      const r = await post({ hunters: v.hunters, tokday: v.tokday, ntfy: v.ntfy, discord: v.discord, auto: v.auto, updates: v.updates, ollama: v.ollama, octx: v.octx, test }, "/api/set");
+      const r = await post({ hunters: v.hunters, tokday: v.tokday, ntfy: v.ntfy, discord: v.discord, auto: v.auto, updates: v.updates, ollama: v.ollama, octx: v.octx, cckc: v.cckc, test }, "/api/set");
       if (r.error) { $("sm").className = "msg bad2"; $("sm").textContent = r.error; return; }
       await settings();
       $("sm").textContent = test ? "Saved and test sent." : "Saved.";

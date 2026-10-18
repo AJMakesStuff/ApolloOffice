@@ -240,9 +240,18 @@ pub struct Ho {
     pub ci: i64,
     pub gb: i64,
     pub on: bool,
+    pub no: Vec<String>,
+    pub cpu: i64,
 }
 
 impl Ho {
+    pub fn skips(&self, repo: &str) -> bool {
+        let r = repo.to_lowercase();
+        let n = r.rsplit('/').next().unwrap_or(&r).to_string();
+        self.no.iter().any(|x| *x == r || *x == n)
+    }
+
+
     fn of(v: &Value) -> Ho {
         Ho {
             id: v["id"].as_str().unwrap_or("").into(),
@@ -252,6 +261,8 @@ impl Ho {
             ci: v["ci"].as_i64().unwrap_or(1).clamp(1, 8),
             gb: v["gb"].as_i64().unwrap_or(50).max(5),
             on: v["on_"].as_i64().unwrap_or(1) == 1,
+            no: v["no"].as_str().unwrap_or("").split([',', ' ']).map(|x| x.trim().to_lowercase()).filter(|x| !x.is_empty()).collect(),
+            cpu: v["cpu"].as_i64().unwrap_or(0).max(0),
         }
     }
 }
@@ -371,7 +382,7 @@ WORKDIR /work
 
 pub fn dkup(h: &Ho, cpu: i64) -> String {
     format!(
-        "command -v docker >/dev/null || {{ echo 'docker is not installed'; exit 2; }}\ndocker info >/dev/null 2>&1 || {{ echo 'docker is not running'; exit 2; }}\nif ! docker image inspect {IM} >/dev/null 2>&1; then docker build -q -t {IM} - <<'DOCKERFILE'\n{DF}DOCKERFILE\nfi\nr=$(docker inspect -f '{{{{.State.Running}}}}' {CT} 2>/dev/null)\nif [ -z \"$r\" ]; then docker run -d --name {CT} --restart unless-stopped --cpus {cpu} -v apollo-office-work:/work -v apollo-office-cargo:/usr/local/cargo/registry {IM} sleep infinity >/dev/null || exit 3; elif [ \"$r\" != true ]; then docker start {CT} >/dev/null || exit 3; fi\necho ok {}\n",
+        "command -v docker >/dev/null || {{ echo 'docker is not installed'; exit 2; }}\ndocker info >/dev/null 2>&1 || {{ echo 'docker is not running'; exit 2; }}\nif ! docker image inspect {IM} >/dev/null 2>&1; then docker build -q -t {IM} - <<'DOCKERFILE'\n{DF}DOCKERFILE\nfi\nr=$(docker inspect -f '{{{{.State.Running}}}}' {CT} 2>/dev/null)\nif [ -z \"$r\" ]; then docker run -d --name {CT} --restart unless-stopped --cpus {cpu} -v apollo-office-work:/work -v apollo-office-cargo:/usr/local/cargo/registry {IM} sleep infinity >/dev/null || exit 3; elif [ \"$r\" != true ]; then docker start {CT} >/dev/null || exit 3; fi\ndocker update --cpus {cpu} {CT} >/dev/null 2>&1\necho ok {}\n",
         h.id
     )
 }
@@ -383,7 +394,7 @@ pub async fn ensure(a: &Ax, id: &str) -> Result<(), String> {
         return if r.c == 0 { Ok(()) } else { Err(format!("{}{}", r.o, r.e).trim().chars().take(300).collect()) };
     }
     let n = hraw(&h, "getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 4", 30).await.o.trim().parse::<i64>().unwrap_or(4);
-    let cpu = (n - 1).max(1);
+    let cpu = if h.cpu > 0 { h.cpu.min(n) } else { (n - 1).max(1) };
     let r = hraw(&h, &dkup(&h, cpu), 3600).await;
     if r.c == 0 {
         Ok(())

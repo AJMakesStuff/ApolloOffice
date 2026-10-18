@@ -64,7 +64,7 @@ pub fn mail(md: &str) -> &'static str {
 
 pub fn status(a: &Ax) -> Value {
     PV.iter()
-        .map(|p| json!({"id": p.id, "nm": p.nm, "key": p.key, "has": !p.key || crate::vault::has(a, p.id), "base": base(a, p.id), "dbase": p.base, "ms": p.ms, "cli": p.fmt == "cli"}))
+        .map(|p| json!({"id": p.id, "nm": p.nm, "key": p.key, "has": !p.key || crate::vault::has(a, p.id), "tok": p.id == "cc" && crate::vault::has(a, "cc"), "base": base(a, p.id), "dbase": p.base, "ms": p.ms, "cli": p.fmt == "cli"}))
         .collect()
 }
 
