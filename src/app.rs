@@ -69,6 +69,7 @@ pub struct App {
     pub runs: Mutex<HashMap<String, Rn>>,
     pub cache: Mutex<HashMap<String, (i64, Value)>>,
     pub vtk: Mutex<HashSet<i64>>,
+    pub sw: tokio::sync::Notify,
 }
 
 pub type Ax = Arc<App>;
@@ -155,6 +156,7 @@ impl App {
             runs: Mutex::new(HashMap::new()),
             cache: Mutex::new(HashMap::new()),
             vtk: Mutex::new(HashSet::new()),
+            sw: tokio::sync::Notify::new(),
         }
     }
 

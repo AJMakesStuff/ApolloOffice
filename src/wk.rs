@@ -147,7 +147,10 @@ pub async fn scout(a: Ax) {
             a.st("scout", "idle", None, "err");
             a.say("scout", &errm(&x), None);
         }
-        sl(300_000).await;
+        tokio::select! {
+            _ = sl(300_000) => {}
+            _ = a.sw.notified() => {}
+        }
     }
 }
 

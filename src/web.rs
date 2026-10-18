@@ -220,6 +220,7 @@ async fn api(a: &Ax, m: &Method, p: &str, q: &str, b: Value) -> Response<Body> {
                     let r = mt["full"].as_str().unwrap_or(&r).to_string();
                     let (c, s) = crate::gh::detect(&r).await;
                     a.db.run("insert or ignore into rp(full,ci,setup,mode,t0) values(?,?,?,?,?)", pa![r.clone(), c.clone(), s.clone(), "ask".to_string(), now()]);
+                    a.sw.notify_one();
                     js(json!({"full": r, "ci": c, "setup": s, "cfg": cfg(a)}))
                 }
                 "set" => {
@@ -248,6 +249,7 @@ async fn api(a: &Ax, m: &Method, p: &str, q: &str, b: Value) -> Response<Body> {
                         }
                     }
                     a.db.kd(&format!("cired:{r}"));
+                    a.sw.notify_one();
                     js(cfg(a))
                 }
                 "detect" => {
