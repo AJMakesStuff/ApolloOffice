@@ -315,6 +315,23 @@ async fn repro(a: &Ax, j: &mut Job) -> R<()> {
     drop("not reproducible")
 }
 
+pub fn junk(p: &str) -> bool {
+    Regex::new(r"(^|/)__pycache__/|\.py[co]$|\.class$|\.o$").unwrap().is_match(p)
+}
+
+async fn dirty(a: &Ax, j: &Job) -> R<Option<String>> {
+    let st = ok(a, j, "git status --porcelain", 60).await?;
+    let ps: Vec<String> = st.lines().filter(|l| l.len() > 3).map(|l| l[3..].trim().trim_matches('"').to_string()).collect();
+    if ps.is_empty() {
+        return Ok(None);
+    }
+    if ps.iter().all(|p| junk(p)) && st.lines().all(|l| l.starts_with(" M")) {
+        ok(a, j, &format!("git checkout -q -f -- {}", ps.iter().map(|p| q(p)).collect::<Vec<_>>().join(" ")), 60).await?;
+        return Ok(None);
+    }
+    Ok(Some(format!("working tree not clean, uncommitted changes in: {}. Commit them into the test or fix commit, or restore them with git checkout / remove them.", ps.iter().take(10).cloned().collect::<Vec<_>>().join(", "))))
+}
+
 async fn run_t(a: &Ax, j: &Job, at: &str, c: &str) -> (i32, String) {
     let l = format!("/tmp/ao-t-{}.log", j.id);
     let r = x(a, j, &format!("rm -f {l}; if git checkout -q {} 2>&1; then {{ to 3600 bash -c {}\n}} > {l} 2>&1; e=$?; tail -c 30000 {l}; git checkout -q -f -- . 2>/dev/null; git clean -fdq 2>/dev/null; else e=125; echo \"[checkout failed]\"; git status --short 2>&1 | head -20; fi; echo \"[exit $e]\"", q(at), q(c)), 3700).await;
@@ -375,8 +392,8 @@ async fn verify(a: &Ax, j: &mut Job, f: &Value) -> R<String> {
     if n != 2 {
         return Ok(format!("expected exactly 2 commits (test, fix) on top of the base, found {n}"));
     }
-    if !ok(a, j, "git status --porcelain", 60).await?.is_empty() {
-        return Ok("working tree not clean, uncommitted changes".into());
+    if let Some(m) = dirty(a, j).await? {
+        return Ok(m);
     }
     let l = ok(a, j, "git log --format=%H -n2", 60).await?;
     let mut it = l.lines();
@@ -633,6 +650,8 @@ fn fixp(a: &Ax, j: &Job, fb: &str) -> String {
             rules(a, j)
         );
     }
+    let ci = rp(a, &j.repo)["ci"].as_str().unwrap_or("").to_string();
+    let h = if ci.is_empty() { h } else { format!("{h} The repository's full test command is `{ci}`; your test_cmd runs in a fresh shell from the repo root, so use the same environment (for example the same virtualenv or package manager).") };
     format!(
         "{h}\n{}:\n{}\n\nRepro result (from a previous agent): {}{}{}",
         if j.hunt() { "Bug found by our own testing (there is no GitHub issue; do not reference one)".to_string() } else { format!("Issue #{}", j.num) },
@@ -648,8 +667,8 @@ async fn vrev(a: &Ax, j: &Job, f: &Value) -> R<String> {
     if n != 1 {
         return Ok(format!("expected exactly 1 new commit on top of the PR head, found {n}"));
     }
-    if !ok(a, j, "git status --porcelain", 60).await?.is_empty() {
-        return Ok("working tree not clean".into());
+    if let Some(m) = dirty(a, j).await? {
+        return Ok(m);
     }
     let c = f["test_cmd"].as_str().map(String::from).filter(|x| !x.is_empty()).unwrap_or(j.s("test_cmd"));
     if !c.is_empty() {
@@ -1603,6 +1622,15 @@ mod t {
         assert!(b.starts_with("Found while testing `a.rs:3`"));
         assert!(!b.contains("#0"));
         assert!(b.contains("Regression tests `a`, `b`: fail on"));
+    }
+
+    #[test]
+    fn junks() {
+        assert!(junk("__pycache__/tb.cpython-314.pyc"));
+        assert!(junk("tests/__pycache__/x.pyc"));
+        assert!(junk("build/a.o"));
+        assert!(!junk("tb.py"));
+        assert!(!junk("src/main.rs"));
     }
 
     #[test]
