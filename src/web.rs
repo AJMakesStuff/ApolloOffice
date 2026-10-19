@@ -318,10 +318,11 @@ pub fn trk(v: &Value) -> Option<Value> {
     Some(json!({"title": ti, "body": b, "where": wh, "logs": st.trim(), "src": "Sentry", "fp": format!("sentry:{id}")}))
 }
 
-async fn hook(a: &Ax, q: &str, b: Body) -> Response<Body> {
+async fn hook(a: &Ax, q: &str, hd: &HeaderMap, b: Body) -> Response<Body> {
     let qv = |k: &str| q.split('&').find_map(|x| x.strip_prefix(&format!("{k}="))).unwrap_or("").to_string();
     let k = a.db.kg("hook");
-    let t = qv("key");
+    let hk = hd.get("x-hook-key").or(hd.get("authorization")).and_then(|v| v.to_str().ok()).map(|s| s.trim_start_matches("Bearer ").trim().to_string()).unwrap_or_default();
+    let t = if hk.is_empty() { qv("key") } else { hk };
     if t.len() < 20 || k["h"].as_str() != Some(&th(&t)) {
         return er(StatusCode::UNAUTHORIZED, "missing or wrong key (Settings → Error trackers)");
     }
@@ -340,7 +341,7 @@ async fn hook(a: &Ax, q: &str, b: Body) -> Response<Body> {
 
 async fn v1(a: &Ax, m: &Method, p: &str, q: &str, hd: &HeaderMap, b: Body) -> Response<Body> {
     if m == Method::POST && p == "/v1/hook" {
-        return hook(a, q, b).await;
+        return hook(a, q, hd, b).await;
     }
     if !tok_ok(a, hd) {
         return er(StatusCode::UNAUTHORIZED, "missing or wrong API token (Settings → API)");
