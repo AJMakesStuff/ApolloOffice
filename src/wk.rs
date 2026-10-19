@@ -163,8 +163,21 @@ async fn vet1(a: &Ax, id: i64) -> R<()> {
     let rl = rp(a, &j.repo)["rules"].as_str().unwrap_or("").trim().to_string();
     let rl = if rl.is_empty() { String::new() } else { format!("\n\nOwner's rules for this repository (trusted):\n{rl}") };
     a.st("vet", "work", Some(id), "");
-    if j.hunt() {
-        let mut o = Ask::new("vet", a.md("vet"), P("vet"), format!("This is not a GitHub issue but a bug our own testing found and proved with a failing test. Judge only: is it a real bug, a focused fix (complex is fine, no rewrite or feature), worth a PR, and testable headless?\n\n{}{rl}", wrap("issue", &format!("{}\n\n{}", j.s("title"), j.s("body")))));
+    if j.own() {
+        if j.ext() {
+            let g = guard(a, vec![("r".into(), format!("{}\n\n{}", j.s("title"), crate::sh::head(&j.s("body"), 30000)))], "vet", Some(id)).await?;
+            if g["r"]["inj"].as_bool().unwrap_or(false) {
+                a.db.jset(id, &[("st", json!("drop")), ("why", json!(format!("Guard: {}", g["r"]["why"].as_str().unwrap_or(""))))]);
+                a.say("guard", &format!("{} blocked: {}", j.tag(), g["r"]["why"].as_str().unwrap_or("")), Some(id));
+                return Ok(());
+            }
+        }
+        let q = if j.ext() {
+            format!("This is not a GitHub issue but a bug report sent to us directly from {}. Nobody has proved it yet. Judge only: is it plausibly a real bug in this repository's code, a focused fix (complex is fine, no rewrite or feature), worth a PR, and testable headless?", j.d["ext"]["src"].as_str().unwrap_or("an external tool"))
+        } else {
+            "This is not a GitHub issue but a bug our own testing found and proved with a failing test. Judge only: is it a real bug, a focused fix (complex is fine, no rewrite or feature), worth a PR, and testable headless?".to_string()
+        };
+        let mut o = Ask::new("vet", a.md("vet"), P("vet"), format!("Repository {}. {q}\n\n{}{rl}", j.repo, wrap("issue", &format!("{}\n\n{}", j.s("title"), j.s("body")))));
         o.job = Some(id);
         o.ef = Some("low");
         let (_, js) = ask(a, o).await?;
@@ -172,7 +185,7 @@ async fn vet1(a: &Ax, id: i64) -> R<()> {
             a.db.jset(id, &[("st", json!("drop")), ("why", json!(format!("Vet: {}", js["why"].as_str().unwrap_or("no answer"))))]);
             return Ok(());
         }
-        let (h, ot) = crate::gh::twins(a, &j.repo, j.d["hunt"]["where"].as_str().unwrap_or("")).await.map_err(X::E)?;
+        let (h, ot) = crate::gh::twins(a, &j.repo, &j.wh()).await.map_err(X::E)?;
         let of: Vec<Value> = a.db.all("select id, d from jobs where repo=? and num=0 and kind='fix' and id<>? and st not in ('drop','done') and (st<>'vet' or id<?) order by id desc limit 50", pa![j.repo.clone(), id, id]);
         if !h.is_empty() || !ot.is_empty() || !of.is_empty() {
             let mut ps = vec![wrap("bug", &format!("{}\n\n{}", j.s("title"), j.s("body")))];
@@ -181,7 +194,7 @@ async fn vet1(a: &Ax, id: i64) -> R<()> {
             }
             ps.push(wrap("other", &format!("Other open PRs (title and start of body):\n\n{}", ot.iter().map(|x| format!("#{} {}\n{}", x["number"], x["title"].as_str().unwrap_or(""), crate::sh::head(&x["body"].as_str().unwrap_or("").split_whitespace().collect::<Vec<_>>().join(" "), 400))).collect::<Vec<_>>().join("\n\n"))));
             if !of.is_empty() {
-                ps.push(wrap("ours", &format!("Our own earlier finds, fix in progress, no PR yet:\n\n{}", of.iter().map(|x| format!("find {}: {}\nwhere: {}\n{}", x["id"], x["d"]["hunt"]["title"].as_str().unwrap_or(""), x["d"]["hunt"]["where"].as_str().unwrap_or(""), crate::sh::head(&x["d"]["body"].as_str().unwrap_or("").split_whitespace().collect::<Vec<_>>().join(" "), 600))).collect::<Vec<_>>().join("\n\n"))));
+                ps.push(wrap("ours", &format!("Our own earlier finds, fix in progress, no PR yet:\n\n{}", of.iter().map(|x| format!("find {}: {}\nwhere: {}\n{}", x["id"], x["d"]["title"].as_str().unwrap_or(""), x["d"]["hunt"]["where"].as_str().or(x["d"]["ext"]["where"].as_str()).unwrap_or(""), crate::sh::head(&x["d"]["body"].as_str().unwrap_or("").split_whitespace().collect::<Vec<_>>().join(" "), 600))).collect::<Vec<_>>().join("\n\n"))));
             }
             let mut o = Ask::new("vet", a.md("vet"), P("twin"), crate::sh::head(&ps.join("\n\n"), 250_000));
             o.job = Some(id);
@@ -196,9 +209,10 @@ async fn vet1(a: &Ax, id: i64) -> R<()> {
         let mut d = j.d.clone();
         d["hint"] = json!(js["hint"].as_str().unwrap_or(""));
         d["cx"] = json!(if js["cx"] == "complex" { "complex" } else { "simple" });
-        a.db.jset(id, &[("st", json!("ready")), ("why", json!(format!("Hunter find: {}", js["why"].as_str().unwrap_or("")))), ("d", d), ("prio", json!(-0.5))]);
+        let k = if j.ext() { "report" } else { "Hunter find" };
+        a.db.jset(id, &[("st", json!("ready")), ("why", json!(format!("{k}: {}", js["why"].as_str().unwrap_or("")))), ("d", d), ("prio", json!(-0.5))]);
         a.flow("vet", "repro", &j.repo);
-        a.say("vet", &format!("{} hunter find approved: {}", j.repo, j.s("title")), Some(id));
+        a.say("vet", &format!("{} {} approved: {}", j.repo, k.to_lowercase(), j.s("title")), Some(id));
         return Ok(());
     }
     a.say("vet", &format!("checking {}", j.tag()), Some(id));
@@ -220,10 +234,14 @@ async fn vet1(a: &Ax, id: i64) -> R<()> {
     }
     let cs: Vec<Value> = i["comments"].as_array().cloned().unwrap_or_default();
     let cs: Vec<Value> = cs[cs.len().saturating_sub(25)..].to_vec();
-    if !cs.is_empty() {
-        let g = guard(a, cs.iter().enumerate().map(|(k, c)| (format!("c{k}"), c["body"].as_str().unwrap_or("").to_string())).collect(), "vet", Some(id)).await?;
-        if let Some((_, v)) = g.as_object().and_then(|o| o.iter().find(|(_, v)| v["inj"].as_bool().unwrap_or(false))) {
-            a.db.jset(id, &[("st", json!("drop")), ("why", json!(format!("Guard: comment {}", v["why"].as_str().unwrap_or(""))))]);
+    let mut gs: Vec<(String, String)> = cs.iter().enumerate().map(|(k, c)| (format!("c{k}"), c["body"].as_str().unwrap_or("").to_string())).collect();
+    if j.d["gi"].as_bool().unwrap_or(false) {
+        gs.push(("issue".into(), format!("#{} {}\n\n{}", j.num, i["title"].as_str().unwrap_or(""), crate::sh::head(i["body"].as_str().unwrap_or(""), 5000))));
+    }
+    if !gs.is_empty() {
+        let g = guard(a, gs, "vet", Some(id)).await?;
+        if let Some((k, v)) = g.as_object().and_then(|o| o.iter().find(|(_, v)| v["inj"].as_bool().unwrap_or(false))) {
+            a.db.jset(id, &[("st", json!("drop")), ("why", json!(format!("Guard: {} {}", if k == "issue" { "issue" } else { "comment" }, v["why"].as_str().unwrap_or(""))))]);
             return Ok(());
         }
     }
@@ -245,7 +263,7 @@ async fn vet1(a: &Ax, id: i64) -> R<()> {
     d["hint"] = json!(js["hint"].as_str().unwrap_or(""));
     d["body"] = json!(crate::sh::head(i["body"].as_str().unwrap_or(""), 8000));
     d["title"] = json!(i["title"].as_str().unwrap_or(""));
-    a.db.jset(id, &[("st", json!("ready")), ("why", json!(js["why"].as_str().unwrap_or(""))), ("d", d)]);
+    a.db.jset(id, &[("st", json!("ready")), ("why", json!(js["why"].as_str().unwrap_or(""))), ("d", d), ("title", json!(i["title"].as_str().unwrap_or(&j.title)))]);
     a.flow("vet", "repro", &j.tag());
     a.say("vet", &format!("{} approved: {}", j.tag(), js["why"].as_str().unwrap_or("")), Some(id));
     Ok(())

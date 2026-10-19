@@ -104,6 +104,7 @@ impl Db {
 
     pub fn run(&self, s: &str, p: P) -> i64 {
         let c = self.0.lock().unwrap();
+        crate::app::chg();
         match c.execute(s, params_from_iter(p.iter().map(|x| x.as_ref()))) {
             Ok(_) => c.last_insert_rowid(),
             Err(e) => {
@@ -115,6 +116,7 @@ impl Db {
 
     pub fn ch(&self, s: &str, p: P) -> usize {
         let c = self.0.lock().unwrap();
+        crate::app::chg();
         c.execute(s, params_from_iter(p.iter().map(|x| x.as_ref()))).unwrap_or(0)
     }
 
@@ -208,8 +210,28 @@ impl Job {
     pub fn hunt(&self) -> bool {
         self.d["hunt"].is_object()
     }
+    pub fn ext(&self) -> bool {
+        self.d["ext"].is_object()
+    }
+    pub fn own(&self) -> bool {
+        self.hunt() || self.ext()
+    }
+    pub fn wh(&self) -> String {
+        self.d["hunt"]["where"].as_str().or(self.d["ext"]["where"].as_str()).unwrap_or("").to_string()
+    }
+    pub fn orig(&self) -> String {
+        if self.hunt() {
+            "Bug found by our own testing (there is no GitHub issue; do not reference one)".into()
+        } else if self.ext() {
+            format!("Bug report sent to us directly from {} (there is no GitHub issue; do not reference one)", self.d["ext"]["src"].as_str().unwrap_or("an external tool"))
+        } else {
+            format!("Issue #{}", self.num)
+        }
+    }
     pub fn tag(&self) -> String {
-        if self.hunt() || self.num == 0 {
+        if self.ext() {
+            format!("{} report {}", self.repo, self.id)
+        } else if self.hunt() || self.num == 0 {
             format!("{} find {}", self.repo, self.id)
         } else {
             format!("{}#{}", self.repo, self.num)

@@ -2,7 +2,9 @@ use crate::app::{Ax, WS};
 use crate::db::now;
 use crate::pa;
 use axum::body::{to_bytes, Body};
-use axum::extract::State;
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::{FromRequestParts, State};
+use axum::response::IntoResponse;
 use axum::http::{HeaderMap, Method, Request, Response, StatusCode};
 use rust_embed::RustEmbed;
 use serde_json::{json, Value};
@@ -19,7 +21,7 @@ fn rs(c: StatusCode, ct: &str, b: impl Into<Body>) -> Response<Body> {
         .header("x-content-type-options", "nosniff")
         .header("x-frame-options", "DENY")
         .header("referrer-policy", "same-origin")
-        .header("content-security-policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'none'")
+        .header("content-security-policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ws://127.0.0.1:* ws://localhost:* ws://[::1]:*; frame-ancestors 'none'; form-action 'self'; base-uri 'none'")
         .body(b.into())
         .unwrap()
 }
@@ -122,7 +124,133 @@ async fn checks(a: &Ax) -> Value {
 }
 
 fn cfg(a: &Ax) -> Value {
-    json!({"repos": a.db.all("select * from rp order by full", pa![]), "hosts": a.db.all("select * from hs order by id='local' desc, id", pa![]), "set": a.set(), "data": a.dd.display().to_string(), "auto": crate::sys::autostart_on(), "prov": crate::prov::status(a), "google": crate::goog::linked(a)["email"], "upd": a.db.kg("upd"), "asset": crate::upd::asset()})
+    json!({"repos": a.db.all("select * from rp order by full", pa![]), "hosts": a.db.all("select * from hs order by id='local' desc, id", pa![]), "set": a.set(), "data": a.dd.display().to_string(), "auto": crate::sys::autostart_on(), "prov": crate::prov::status(a), "google": crate::goog::linked(a)["email"], "upd": a.db.kg("upd"), "asset": crate::upd::asset(), "api": {"on": a.db.kg("api")["h"].is_string(), "t0": a.db.kg("api")["t0"], "last": a.db.kg("api")["last"], "port": a.port}})
+}
+
+fn th(t: &str) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(t.as_bytes()))
+}
+
+fn tok_ok(a: &Ax, h: &HeaderMap) -> bool {
+    let t = h.get("authorization").and_then(|v| v.to_str().ok()).and_then(|s| s.strip_prefix("Bearer ")).unwrap_or("").trim().to_string();
+    let k = a.db.kg("api");
+    if t.len() < 20 || k["h"].as_str() != Some(&th(&t)) {
+        return false;
+    }
+    let mut k = k;
+    k["last"] = json!(now());
+    a.db.ks("api", &k);
+    true
+}
+
+fn cut(s: &str, n: usize) -> String {
+    if s.len() <= n {
+        return s.to_string();
+    }
+    let h = crate::sh::head(s, n / 5);
+    let mut i = s.len() - (n - n / 5);
+    while !s.is_char_boundary(i) {
+        i += 1;
+    }
+    format!("{h}\n[...]\n{}", &s[i..])
+}
+
+fn rep(a: &Ax, b: &Value) -> Result<Value, (StatusCode, String)> {
+    let bad = |m: &str| Err((StatusCode::BAD_REQUEST, m.to_string()));
+    let Some(r) = rid(b["repo"].as_str().unwrap_or("")) else { return bad("repo must be owner/name") };
+    if a.db.n("select count(*) from rp where full=? and on_=1", pa![r.clone()]) == 0 {
+        return bad("this repository is not added to the office or is switched off");
+    }
+    if a.db.n("select count(*) from jobs where json_extract(d,'$.api')=1 and st not in ('done','drop')", pa![]) >= 20 {
+        return Err((StatusCode::TOO_MANY_REQUESTS, "20 reports are already open, try again later".into()));
+    }
+    let src: String = b["src"].as_str().unwrap_or("").trim().chars().take(60).collect();
+    if let Some(n) = b["issue"].as_i64() {
+        if n <= 0 {
+            return bad("issue must be a positive number");
+        }
+        if let Some(x) = a.db.one("select id from jobs where repo=? and num=? and kind='fix' and st<>'drop'", pa![r.clone(), n]) {
+            return Ok(json!({"id": x["id"], "new": false}));
+        }
+        let id = a.db.jnew(&r, n, "fix", &format!("Issue #{n}"), &format!("https://github.com/{r}/issues/{n}"), "vet", &format!("sent through the API{}", if src.is_empty() { String::new() } else { format!(" by {src}") }), json!({"api": 1, "gi": true}), None, -0.7);
+        a.flow("scout", "vet", &format!("{r}#{n}"));
+        a.say("scout", &format!("{r}#{n} sent through the API → Vet"), Some(id));
+        return Ok(json!({"id": id, "new": true}));
+    }
+    let ti: String = b["title"].as_str().unwrap_or("").split_whitespace().collect::<Vec<_>>().join(" ").chars().take(200).collect();
+    let bd = b["body"].as_str().unwrap_or("").trim().to_string();
+    if ti.is_empty() || bd.is_empty() {
+        return bad("title and body are required (or issue)");
+    }
+    let wh: String = b["where"].as_str().unwrap_or("").trim().chars().take(300).collect();
+    let lg = b["logs"].as_str().unwrap_or("").trim();
+    let mut body = cut(&bd, 20000);
+    if !wh.is_empty() {
+        body.push_str(&format!("\n\nWhere: {wh}"));
+    }
+    if !lg.is_empty() {
+        body.push_str(&format!("\n\nLogs:\n```\n{}\n```", cut(lg, 20000)));
+    }
+    let id = a.db.jnew(&r, 0, "fix", &ti, &format!("https://github.com/{r}"), "vet", &format!("reported{}", if src.is_empty() { String::new() } else { format!(" by {src}") }), json!({"api": 1, "ext": {"src": if src.is_empty() { "an external tool".to_string() } else { src.clone() }, "where": wh}, "title": ti, "body": body}), None, -0.7);
+    a.flow("scout", "vet", &r);
+    a.say("scout", &format!("{r} report {id} received{}: {ti}", if src.is_empty() { String::new() } else { format!(" from {src}") }), Some(id));
+    Ok(json!({"id": id, "new": true}))
+}
+
+fn repst(a: &Ax, id: i64) -> Option<Value> {
+    let j = a.db.one("select id,repo,num,st,why,pr,t0,t1 from jobs where id=? and json_extract(d,'$.api')=1", pa![id])?;
+    let pu = j["pr"].as_i64().map(|n| format!("https://github.com/{}/pull/{n}", j["repo"].as_str().unwrap_or("")));
+    Some(json!({"id": j["id"], "repo": j["repo"], "issue": if j["num"].as_i64().unwrap_or(0) > 0 { j["num"].clone() } else { Value::Null }, "st": j["st"], "why": j["why"], "pr": pu, "t0": j["t0"], "t1": j["t1"]}))
+}
+
+async fn v1(a: &Ax, m: &Method, p: &str, q: &str, hd: &HeaderMap, b: Body) -> Response<Body> {
+    if !tok_ok(a, hd) {
+        return er(StatusCode::UNAUTHORIZED, "missing or wrong API token (Settings → API)");
+    }
+    let qv = |k: &str| q.split('&').find_map(|x| x.strip_prefix(&format!("{k}="))).unwrap_or("").to_string();
+    match (m.as_str(), p) {
+        ("POST", "/v1/report") => {
+            let Ok(by) = to_bytes(b, 1 << 20).await else { return er(StatusCode::PAYLOAD_TOO_LARGE, "body larger than 1 MB") };
+            let Ok(v) = serde_json::from_slice::<Value>(&by) else { return er(StatusCode::BAD_REQUEST, "body must be JSON") };
+            match rep(a, &v) {
+                Ok(r) => js(r),
+                Err((c, e)) => er(c, &e),
+            }
+        }
+        ("GET", "/v1/report") => match repst(a, qv("id").parse().unwrap_or(0)) {
+            Some(v) => js(v),
+            None => er(StatusCode::NOT_FOUND, "no report with this id"),
+        },
+        ("GET", "/v1/reports") => js(json!(a.db.all("select id from jobs where json_extract(d,'$.api')=1 order by id desc limit 50", pa![]).iter().filter_map(|x| repst(a, x["id"].as_i64().unwrap_or(0))).collect::<Vec<_>>())),
+        ("GET", "/v1/repos") => js(json!(a.db.all("select full from rp where on_=1 order by full", pa![]).iter().filter_map(|x| x["full"].as_str().map(String::from)).collect::<Vec<_>>())),
+        _ => er(StatusCode::NOT_FOUND, "unknown endpoint"),
+    }
+}
+
+async fn ws(a: Ax, mut s: WebSocket) {
+    let mut last = String::new();
+    loop {
+        let n = crate::app::CHG.notified();
+        tokio::pin!(n);
+        n.as_mut().enable();
+        let mut v = state(&a);
+        v["t"] = json!(0);
+        let k = v.to_string();
+        if k != last {
+            v["t"] = json!(now());
+            if s.send(Message::Text(v.to_string().into())).await.is_err() {
+                return;
+            }
+            last = k;
+        }
+        tokio::select! {
+            _ = &mut n => tokio::time::sleep(std::time::Duration::from_millis(200)).await,
+            _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => {}
+            m = s.recv() => if !matches!(m, Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Text(_) | Message::Binary(_)))) { return },
+            _ = a.quit.notified() => return,
+        }
+    }
 }
 
 fn rid(s: &str) -> Option<String> {
@@ -144,7 +272,7 @@ async fn api(a: &Ax, m: &Method, p: &str, q: &str, b: Value) -> Response<Body> {
         ("GET", "/api/job") => {
             let id: i64 = qv("id").parse().unwrap_or(0);
             match a.db.one("select * from jobs where id=?", pa![id]) {
-                Some(j) => js(json!({"id": j["id"], "repo": j["repo"], "num": j["num"], "kind": j["kind"], "title": j["title"], "url": j["url"], "st": j["st"], "why": j["why"], "pt": j["d"]["pt"], "pb": j["d"]["pb"], "df": j["d"]["df"], "proof": j["d"]["proof"], "known": j["d"]["known"], "h": j["d"]["h"], "ev": a.db.all("select t,w,m from ev where j=? order by id desc limit 80", pa![id])})),
+                Some(j) => js(json!({"id": j["id"], "repo": j["repo"], "num": j["num"], "kind": j["kind"], "title": j["title"], "url": j["url"], "st": j["st"], "why": j["why"], "pt": j["d"]["pt"], "pb": j["d"]["pb"], "df": j["d"]["df"], "proof": j["d"]["proof"], "known": j["d"]["known"], "h": j["d"]["h"], "ext": j["d"]["ext"]["src"], "ev": a.db.all("select t,w,m from ev where j=? order by id desc limit 80", pa![id])})),
                 None => er(StatusCode::NOT_FOUND, "no such job"),
             }
         }
@@ -388,6 +516,20 @@ async fn api(a: &Ax, m: &Method, p: &str, q: &str, b: Value) -> Response<Body> {
                 Err(e) => js(json!({"ok": false, "m": crate::wk::errm(&e)})),
             }
         }
+        ("POST", "/api/apitok") => match b["op"].as_str().unwrap_or("") {
+            "new" => {
+                let t = format!("ao_{}", hex::encode(rand::random::<[u8; 24]>()));
+                a.db.ks("api", &json!({"h": th(&t), "t0": now()}));
+                a.say("scout", "new API token created", None);
+                js(json!({"ok": true, "tok": t}))
+            }
+            "off" => {
+                a.db.kd("api");
+                a.say("scout", "API token revoked", None);
+                js(json!({"ok": true}))
+            }
+            _ => er(StatusCode::BAD_REQUEST, "op"),
+        },
         ("POST", "/api/google") => match b["op"].as_str().unwrap_or("") {
             "link" => js(json!({"url": crate::goog::start(a, "link")})),
             "unlink" => {
@@ -426,7 +568,26 @@ async fn api(a: &Ax, m: &Method, p: &str, q: &str, b: Value) -> Response<Body> {
 }
 
 pub async fn h(State(a): State<Ax>, req: Request<Body>) -> Response<Body> {
-    let (pt, b) = req.into_parts();
+    let (mut pt, b) = req.into_parts();
+    if pt.uri.path() == "/api/ws" {
+        if !host_ok(&a, &pt.headers) || !authed(&a, &pt.headers) {
+            return er(StatusCode::UNAUTHORIZED, "login");
+        }
+        if !origin_ok(&a, &pt.headers) {
+            return er(StatusCode::FORBIDDEN, "forbidden");
+        }
+        return match WebSocketUpgrade::from_request_parts(&mut pt, &a).await {
+            Ok(u) => {
+                let a2 = a.clone();
+                u.on_upgrade(move |s| ws(a2, s)).into_response()
+            }
+            Err(e) => e.into_response(),
+        };
+    }
+    if pt.uri.path().starts_with("/v1/") {
+        let (m, p, q) = (pt.method.clone(), pt.uri.path().to_string(), pt.uri.query().unwrap_or("").to_string());
+        return v1(&a, &m, &p, &q, &pt.headers, b).await;
+    }
     let m = pt.method.clone();
     let p = pt.uri.path().to_string();
     let q = pt.uri.query().unwrap_or("").to_string();

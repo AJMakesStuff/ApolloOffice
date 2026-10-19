@@ -79,6 +79,12 @@ pub struct App {
 
 pub type Ax = Arc<App>;
 
+pub static CHG: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
+pub fn chg() {
+    CHG.notify_waiters();
+}
+
 #[derive(Debug)]
 pub enum X {
     Drop(String),
@@ -220,12 +226,14 @@ impl App {
             x.mood = mood.into();
             x.t = now();
         }
+        chg();
     }
 
     pub fn stmd(&self, w: &str, md: &str) {
         if let Some(x) = self.lv.lock().unwrap().w.get_mut(w) {
             x.md = md.into();
         }
+        chg();
     }
 
     pub fn flow(&self, a: &str, b: &str, k: &str) {
@@ -234,6 +242,7 @@ impl App {
         while l.fl.len() > 40 {
             l.fl.remove(0);
         }
+        chg();
     }
 
     pub fn tok(&self, w: &str, i: i64, o: i64) {

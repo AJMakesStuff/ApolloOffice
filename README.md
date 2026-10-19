@@ -42,6 +42,9 @@ ours.
   The GitHub token never leaves your computer.
 - **Watcher** follows your open PRs: merges, review requests from maintainers
   and merge conflicts, which it rebases on its own.
+- **API** for bug reports from your own tools (error trackers, CI, scripts):
+  `POST /v1/report` with a token from Settings. Reports go through Guard and
+  Vet like issues.
 - **Sign in** with a one-time link or your Google account, notifications by
   ntfy or Discord, and automatic updates.
 

@@ -433,12 +433,22 @@
   $("bStar").onclick = (e) => { e.target.disabled = true; post({ op: "star" }, "/api/star").then((r) => { e.target.disabled = false; if (r.error) { e.target.textContent = "Could not star, try again"; return; } apply(r); }); };
   $("bLater").onclick = () => post({ op: "later" }, "/api/star").then(apply);
 
+  let wok = false;
+  const live = () => {
+    let w;
+    try { w = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/api/ws"); } catch { return setTimeout(live, 5000); }
+    w.onmessage = (e) => { wok = true; try { apply(JSON.parse(e.data)); } catch {} };
+    w.onclose = () => { wok = false; setTimeout(live, 3000); };
+  };
   const poll = async () => {
-    try { apply(await get("/api/state")); } catch {
-      if (++err > 2) { $("cNet").className = "chip bad"; $("cNet").textContent = "ApolloOffice not reachable"; }
+    if (!wok) {
+      try { apply(await get("/api/state")); } catch {
+        if (++err > 2) { $("cNet").className = "chip bad"; $("cNet").textContent = "ApolloOffice not reachable"; }
+      }
     }
     setTimeout(poll, 1000);
   };
   poll();
+  live();
   requestAnimationFrame(frame);
 })();

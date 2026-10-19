@@ -292,7 +292,7 @@ fn cx(a: &Ax, j: &Job) -> bool {
 
 async fn repro(a: &Ax, j: &mut Job) -> R<()> {
     a.db.jset(j.id, &[("st", json!("repro"))]);
-    let p = format!("Repository: {}. {}.\nVet note: {}\n\n{}", j.repo, if j.num > 0 { format!("Issue #{}", j.num) } else { "Bug found by our own testing".into() }, j.d["hint"].as_str().unwrap_or("-"), wrap("issue", &format!("{}\n\n{}", if j.s("title").is_empty() { &j.title } else { j.d["title"].as_str().unwrap() }, j.s("body"))));
+    let p = format!("Repository: {}. {}.\nVet note: {}\n\n{}", j.repo, j.orig(), j.d["hint"].as_str().unwrap_or("-"), wrap("issue", &format!("{}\n\n{}", if j.s("title").is_empty() { &j.title } else { j.d["title"].as_str().unwrap() }, j.s("body"))));
     let ms = if cx(a, j) { vec![a.md("big")] } else { vec![a.md("repro"), a.md("repro2")] };
     for md in ms {
         a.st("repro", "work", Some(j.id), "");
@@ -558,7 +558,7 @@ fn san(s: &str) -> String {
 pub fn body(j: &Job, f: &Value, ci: &str, ft: &str) -> String {
     let g = |k: &str| {
         let s = f[k].as_str().unwrap_or("").to_string();
-        if j.hunt() {
+        if j.own() {
             san(&s)
         } else {
             s
@@ -572,6 +572,8 @@ pub fn body(j: &Job, f: &Value, ci: &str, ft: &str) -> String {
     if j.kind == "fix" {
         if j.hunt() {
             v.push(format!("Found while testing `{}` (no existing issue): {}.", j.d["hunt"]["where"].as_str().unwrap_or(""), j.d["hunt"]["title"].as_str().unwrap_or("")));
+        } else if j.ext() {
+            v.push(format!("Reported to us directly (no existing issue): {}.", j.s("title")));
         } else {
             v.push(format!("Fixes #{}", j.num));
         }
@@ -605,7 +607,7 @@ async fn review(a: &Ax, j: &mut Job, f: &mut Value) -> R<String> {
     let p = format!(
         "Repository {}, {}.\n\n{}\n\n{}Commit messages:\n{lg}\n\nPR title: {}\nPR body:\n{}\n\nDiff:\n{df}{}",
         j.repo,
-        if j.hunt() { "no GitHub issue (bug found by our own testing; the PR must not reference any issue number)".to_string() } else { format!("issue #{}", j.num) },
+        if j.own() { "no GitHub issue (the PR must not reference any issue number)".to_string() } else { format!("issue #{}", j.num) },
         wrap("issue", &format!("{}\n\n{}", j.title, crate::sh::head(&j.s("body"), 4000))),
         if j.kind == "review" { format!("{}\n\n", wrap("request", &j.s("change"))) } else { String::new() },
         f["title"].as_str().unwrap_or(""),
@@ -659,7 +661,7 @@ fn fixp(a: &Ax, j: &Job, fb: &str) -> String {
     let h = if ci.is_empty() { h } else { format!("{h} The repository's full test command is `{ci}`; your test_cmd runs in a fresh shell from the repo root, so use the same environment (for example the same virtualenv or package manager).") };
     format!(
         "{h}\n{}:\n{}\n\nRepro result (from a previous agent): {}{}{}",
-        if j.hunt() { "Bug found by our own testing (there is no GitHub issue; do not reference one)".to_string() } else { format!("Issue #{}", j.num) },
+        j.orig(),
         wrap("issue", &format!("{}\n\n{}", j.title, j.s("body"))),
         j.d["repro"],
         if fb.is_empty() { String::new() } else { format!("\n\nYour previous attempt was rejected by the pipeline:\n{fb}\nThe branch still contains your previous commits; fix the problems and make sure there are exactly two commits (test, fix) on top of the base commit.") },
@@ -825,7 +827,7 @@ fn rbw(j: &Job, c: &str) -> String {
 }
 
 async fn taken(a: &Ax, j: &Job) -> R<String> {
-    if j.kind != "fix" || j.hunt() || j.num == 0 {
+    if j.kind != "fix" || j.own() || j.num == 0 {
         return Ok(String::new());
     }
     let me = crate::gh::login(a).await;
@@ -877,7 +879,7 @@ async fn gate(a: &Ax, j: &mut Job) -> R<()> {
     let mn = j.s("mn");
     pull(a, j, &format!("{}{}.git", gitb(), j.repo), &mn, &format!("refs/remotes/origin/{mn}")).await?;
     let nb = ok(a, j, &format!("git rev-parse origin/{}", q(&mn)), 60).await?;
-    if !j.hunt() && j.num > 0 {
+    if !j.own() && j.num > 0 {
         let hit = ok(a, j, &format!("git log --format='%h %s' {}..origin/{} | grep -E '#{}([^0-9]|$)' || true", j.s("base"), q(&mn), j.num), 60).await?;
         if !hit.is_empty() {
             return drop(format!("someone was faster: commit on {mn} mentions #{}: {}", j.num, hit.lines().next().unwrap_or("")));
@@ -935,7 +937,7 @@ async fn mkbody(a: &Ax, j: &mut Job) -> R<()> {
             if let Ok((_, js)) = ask(a, o).await {
                 if let Some(s) = js["body"].as_str().filter(|s| s.len() > 40) {
                     b = s.trim().to_string();
-                    if j.hunt() {
+                    if j.own() {
                         b = san(&b);
                     }
                     if !b.contains(ft) {
@@ -963,7 +965,7 @@ async fn submit(a: &Ax, j: &mut Job) -> R<(String, i64)> {
     let tr = trs(j);
     let ti = j.d["pt"].as_str().map(String::from).filter(|x| !x.trim().is_empty()).unwrap_or(f["title"].as_str().unwrap_or(&j.title).to_string());
     if j.kind == "fix" && !j.d["sq"].as_bool().unwrap_or(false) {
-        let rf = if j.hunt() || j.num == 0 { format!("Found while testing {}", j.d["hunt"]["where"].as_str().unwrap_or("")) } else { format!("Fixes #{}", j.num) };
+        let rf = if j.ext() { "Reported to us directly".to_string() } else if j.hunt() || j.num == 0 { format!("Found while testing {}", j.wh()) } else { format!("Fixes #{}", j.num) };
         ok(a, j, &format!("git reset -q --soft {} && git commit -q -F - <<'MSG'\n{ti}\n\n{rf}\n\n{}\nMSG", j.s("base"), tr.join("\n")), 120).await?;
         j.d["sq"] = json!(true);
         a.db.jd(j);
@@ -1110,7 +1112,7 @@ async fn hunt(a: &Ax, j: &mut Job) -> R<i64> {
     a.db.jset(j.id, &[("st", json!("hunt"))]);
     a.st("hunter", "work", Some(j.id), "");
     a.say("hunter", &format!("[{}] hunting bugs in {}", j.h(), j.repo), Some(j.id));
-    let mut ti: Vec<String> = a.db.all("select id, json_extract(d,'$.hunt.title') t, json_extract(d,'$.hunt.where') w from jobs where repo=? and num=0 and kind='fix' and st not in ('drop') order by id desc limit 200", pa![j.repo.clone()]).iter().map(|x| format!("office find #{}: {}\n  where: {}", x["id"], x["t"].as_str().unwrap_or(""), x["w"].as_str().unwrap_or(""))).collect();
+    let mut ti: Vec<String> = a.db.all("select id, json_extract(d,'$.title') t, coalesce(json_extract(d,'$.hunt.where'),json_extract(d,'$.ext.where'),'') w from jobs where repo=? and num=0 and kind='fix' and st not in ('drop') order by id desc limit 200", pa![j.repo.clone()]).iter().map(|x| format!("office find #{}: {}\n  where: {}", x["id"], x["t"].as_str().unwrap_or(""), x["w"].as_str().unwrap_or(""))).collect();
     for x in ghj(&["pr", "list", "-R", &j.repo, "--state", "open", "--limit", "1000", "--json", "number,title,body"], 240).await.unwrap_or_default().as_array().cloned().unwrap_or_default() {
         ti.push(format!("pr #{}: {}\n  {}", x["number"], x["title"].as_str().unwrap_or(""), crate::sh::head(&x["body"].as_str().unwrap_or("").split_whitespace().collect::<Vec<_>>().join(" "), 250)));
     }
@@ -1478,7 +1480,7 @@ async fn pick(a: &Ax, h: &str) -> Option<i64> {
 fn hn(a: &Ax) -> i64 {
     let cap = a.set()["hunters"].as_i64().unwrap_or(2).clamp(0, 12);
     let l: i64 = hosts(a).iter().filter(|h| h.on && a.net(&h.id)).map(|h| h.ln).sum();
-    let hf = a.db.n("select count(*) from jobs where kind='fix' and num=0 and st in ('vet','ready')", pa![]);
+    let hf = a.db.n("select count(*) from jobs where kind='fix' and num=0 and st in ('vet','ready') and json_extract(d,'$.ext') is null", pa![]);
     if cap == 0 {
         return 0;
     }
