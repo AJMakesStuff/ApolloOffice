@@ -405,7 +405,7 @@ pub async fn ensure(a: &Ax, id: &str) -> Result<(), String> {
 
 pub async fn gh(a: &[&str], t: u64) -> Result<String, String> {
     let v: Vec<String> = a.iter().map(|x| x.to_string()).collect();
-    let r = run(&tool("gh"), &v, Rq { t, env: vec![("GH_PROMPT_DISABLED".into(), "1".into()), ("NO_COLOR".into(), "1".into())], ..Default::default() }).await;
+    let r = run(&tool("gh"), &v, Rq { t, env: vec![("GH_PROMPT_DISABLED".into(), "1".into()), ("NO_COLOR".into(), "1".into())], keep: true, ..Default::default() }).await;
     if r.c != 0 {
         return Err(format!("gh {}: {}", a.iter().take(3).cloned().collect::<Vec<_>>().join(" "), if r.e.trim().is_empty() { r.o.trim() } else { r.e.trim() }).chars().take(400).collect());
     }
@@ -429,6 +429,12 @@ pub async fn apip(p: &str) -> Result<Vec<Value>, String> {
 #[cfg(test)]
 mod t {
     use super::*;
+
+    #[tokio::test]
+    async fn keeps_long_output() {
+        let r = run(&bash(), &["-c".into(), "head -c 900000 /dev/zero | tr '\\0' a; echo END".into()], Rq { t: 30, keep: true, ..Default::default() }).await;
+        assert!(r.o.starts_with('a') && r.o.trim_end().ends_with("END") && r.o.len() > 900_000);
+    }
 
     #[tokio::test]
     async fn utf8_stderr() {
