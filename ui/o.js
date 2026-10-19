@@ -55,7 +55,7 @@
     return "#" + [y, y, y].map((v) => v.toString(16).padStart(2, "0")).join("");
   };
   const dim = (sk) => ({ body: gray(sk.body, 0.6), dark: gray(sk.dark, 0.6), light: gray(sk.light, 0.6) });
-  const LT = { "#0d0e10": "#e7e3d9", "#121317": "#dcd7cb", "#1d1f24": "#cbc5b8", "#111215": "#e0dcd1", "#0f1013": "#dfdace", "#3d4045": "#a19c90", "#4a4d54": "#8d887d", "#2a2c32": "#aaa396", "#1c1e22": "#c4bdaf", "#25272c": "#d2ccbf", "#16171a": "#958f82", "#141518": "#b1ab9e", "#232529": "#a7a194", "#26282d": "#bab4a7", "#75746f": "#8d887d", "#b9bcc2": "#55534d", "#2a1715": "#d9b3ad" };
+  const LT = { "#0d0e10": "#e4e7ec", "#121317": "#d5dae1", "#1d1f24": "#bcc2cb", "#111215": "#dde1e7", "#0f1013": "#eceef2", "#3d4045": "#9aa1ab", "#4a4d54": "#7d8490", "#2a2c32": "#a9b0ba", "#1c1e22": "#c3c9d1", "#25272c": "#cdd2d9", "#16171a": "#8e95a0", "#141518": "#b0b7c1", "#232529": "#a3aab4", "#26282d": "#b9c0c9", "#75746f": "#7d8490", "#b9bcc2": "#4c515b", "#2a1715": "#e8bfb9" };
   const lt = () => document.documentElement.dataset.th === "light";
   const C = (k) => (lt() && LT[k]) || k;
   const hl = (n) => (lt() ? SK[n].dark : SK[n].light);

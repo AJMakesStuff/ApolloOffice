@@ -23,9 +23,15 @@
   --s: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif;
   color-scheme: dark;
 }
-:root[data-th=light] { --g: #f4f3ef; --p: #ffffff; --h: #efeee9; --f: #f1f0ec; --l: #dddbd4; --t1: #1b1a18; --t2: #55534d; --t3: #8a8882; --ok: #2f8a3c; --bad: #c2443a; --info: #2878a8; color-scheme: light; }
+:root[data-th=light] { --g: #e9ebef; --p: #ffffff; --h: #f4f5f7; --f: #f2f3f6; --l: #d9dce2; --t1: #15171b; --t2: #4c515b; --t3: #878c96; --ok: #22844a; --bad: #c23b33; --info: #1f6fa8; color-scheme: light; }
+[data-th=light] .card, [data-th=light] .tile, [data-th=light] .stage { border-color: #dfe2e7; box-shadow: 0 1px 2px rgba(20,24,32,.05), 0 2px 8px rgba(20,24,32,.04); }
+[data-th=light] .stage { background: #e4e7ec; }
+[data-th=light] .tile:hover { border-color: #b9bec7; }
+[data-th=light] button { background: #fff; border-color: #d3d7de; }
+[data-th=light] button:hover { background: var(--f); }
 [data-th=light] button.go, [data-th=light] button.pri { color: #fff; }
 [data-th=light] button.pri:hover { background: #000; }
+[data-th=light] button.go:hover { background: #1b6e3d; border-color: #1b6e3d; }
 [data-th=light] #dr { background: rgba(0,0,0,.25); }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: var(--g); color: var(--t1); font: 13px/1.4 var(--s); }
