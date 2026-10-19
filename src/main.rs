@@ -115,14 +115,20 @@ async fn main() -> anyhow::Result<()> {
     star::spawn(ax.clone());
     let r = axum::Router::new().fallback(web::h).with_state(ax.clone());
     let q = ax.clone();
-    axum::serve(l, r)
-        .with_graceful_shutdown(async move {
-            tokio::select! {
-                _ = tokio::signal::ctrl_c() => {}
-                _ = q.quit.notified() => {}
-            }
-        })
-        .await?;
+    let q2 = ax.clone();
+    let sv = axum::serve(l, r).with_graceful_shutdown(async move {
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = q.quit.notified() => {}
+        }
+    });
+    tokio::select! {
+        r = sv => r?,
+        _ = async move {
+            q2.quit.notified().await;
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        } => {}
+    }
     if *ax.restart.lock().unwrap() {
         match upd::install(&ax) {
             Ok(()) => upd::relaunch(&ax.me),
