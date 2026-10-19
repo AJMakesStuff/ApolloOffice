@@ -317,22 +317,27 @@ pub async fn vet(a: Ax) {
 
 const MA: &[&str] = &["OWNER", "MEMBER", "COLLABORATOR"];
 
+pub fn pending(cs: Vec<Value>, last: &str) -> Vec<Value> {
+    let Ok(l) = chrono::DateTime::parse_from_rfc3339(last) else { return cs };
+    cs.into_iter().filter(|c| c["at"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).map(|t| t > l).unwrap_or(false)).collect()
+}
+
 async fn comments(r: &str, n: i64, me: &str) -> R<Vec<Value>> {
     let bot = Regex::new(r"(?i)\[bot\]$|^github-actions$|^dependabot").unwrap();
     let (u1, u2, u3) = (format!("repos/{r}/issues/{n}/comments?per_page=100"), format!("repos/{r}/pulls/{n}/reviews?per_page=100"), format!("repos/{r}/pulls/{n}/comments?per_page=100"));
     let (a, b, c) = tokio::join!(apip(&u1), apip(&u2), apip(&u3));
     let mut o = vec![];
     for x in a.map_err(X::E)? {
-        o.push(json!({"id": format!("i{}", x["id"]), "by": x["user"]["login"], "as": x["author_association"], "t": x["body"].as_str().unwrap_or(""), "k": "comment"}));
+        o.push(json!({"id": format!("i{}", x["id"]), "by": x["user"]["login"], "as": x["author_association"], "t": x["body"].as_str().unwrap_or(""), "k": "comment", "at": x["created_at"]}));
     }
     for x in b.map_err(X::E)? {
         if x["body"].as_str().map(|s| !s.is_empty()).unwrap_or(false) || x["state"] == "CHANGES_REQUESTED" {
-            o.push(json!({"id": format!("r{}", x["id"]), "by": x["user"]["login"], "as": x["author_association"], "t": format!("[review: {}] {}", x["state"].as_str().unwrap_or(""), x["body"].as_str().unwrap_or("")), "k": "review"}));
+            o.push(json!({"id": format!("r{}", x["id"]), "by": x["user"]["login"], "as": x["author_association"], "t": format!("[review: {}] {}", x["state"].as_str().unwrap_or(""), x["body"].as_str().unwrap_or("")), "k": "review", "at": x["submitted_at"]}));
         }
     }
     for x in c.map_err(X::E)? {
         let dh = x["diff_hunk"].as_str().map(|d| format!("```diff\n{}\n```\n", crate::sh::last(d, 800))).unwrap_or_default();
-        o.push(json!({"id": format!("c{}", x["id"]), "by": x["user"]["login"], "as": x["author_association"], "t": format!("[on {}:{}]\n{dh}{}", x["path"].as_str().unwrap_or(""), x["line"].as_i64().or(x["original_line"].as_i64()).map(|l| l.to_string()).unwrap_or("?".into()), x["body"].as_str().unwrap_or("")), "k": "line"}));
+        o.push(json!({"id": format!("c{}", x["id"]), "by": x["user"]["login"], "as": x["author_association"], "t": format!("[on {}:{}]\n{dh}{}", x["path"].as_str().unwrap_or(""), x["line"].as_i64().or(x["original_line"].as_i64()).map(|l| l.to_string()).unwrap_or("?".into()), x["body"].as_str().unwrap_or("")), "k": "line", "at": x["created_at"]}));
     }
     Ok(o.into_iter().filter(|x| x["by"].as_str().map(|b| b != me && !bot.is_match(b)).unwrap_or(false)).collect())
 }
@@ -367,9 +372,13 @@ async fn watch1(a: &Ax) -> R<()> {
         }
         let first = !p["d"]["seen"].as_bool().unwrap_or(false);
         let cs = comments(&r, n, &me).await?;
-        let nw: Vec<Value> = cs.into_iter().filter(|c| a.db.n("select count(*) from cm where id=?", pa![format!("{r}:{}", c["id"].as_str().unwrap_or(""))]) == 0).collect();
+        let mut nw: Vec<Value> = cs.into_iter().filter(|c| a.db.n("select count(*) from cm where id=? or id=?", pa![format!("{r}:{}", c["id"].as_str().unwrap_or("")), c["id"].as_str().unwrap_or("").to_string()]) == 0).collect();
         for c in &nw {
             a.db.run("insert or ignore into cm(id,t) values(?,?)", pa![format!("{r}:{}", c["id"].as_str().unwrap_or("")), now()]);
+        }
+        if first && !nw.is_empty() {
+            let lc = ghj(&["pr", "view", &n.to_string(), "-R", &r, "--json", "commits", "--jq", ".commits[-1].committedDate"], 60).await.ok().and_then(|x| x.as_str().map(String::from)).unwrap_or_default();
+            nw = pending(nw, &lc);
         }
         if first {
             let mut d = p["d"].clone();
@@ -425,5 +434,19 @@ pub async fn watch(a: Ax) {
             a.say("watcher", &errm(&x), None);
         }
         sl(600_000).await;
+    }
+}
+
+#[cfg(test)]
+mod t {
+    use super::*;
+
+    #[test]
+    fn pend() {
+        let c = |at: &str| json!({"id": at, "at": at});
+        let v = pending(vec![c("2026-10-18T10:00:00Z"), c("2026-10-19T10:00:00Z")], "2026-10-18T12:00:00Z");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0]["at"], "2026-10-19T10:00:00Z");
+        assert_eq!(pending(vec![c("2026-10-18T10:00:00Z")], "").len(), 1);
     }
 }
