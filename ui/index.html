@@ -76,6 +76,21 @@ main { display: grid; grid-template-columns: minmax(0, 1fr) clamp(300px, 28vw, 4
 .mg .mq { margin-top: 8px; font: 12px/1.45 var(--m); color: var(--t2); display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
 @keyframes mgin { from { opacity: 0; transform: translate(-50%, -8px); } to { opacity: 1; transform: translate(-50%, 0); } }
 @media (prefers-reduced-motion: reduce) { .mg { animation: none; } }
+.tip { position: fixed; z-index: 30; width: max-content; max-width: 340px; background: var(--p); border: 1px solid var(--l); border-radius: var(--r); padding: 9px 11px; font: 11px/1.45 var(--m); color: var(--t2); pointer-events: none; box-shadow: 0 6px 20px rgba(0,0,0,.35); }
+.tip .th { display: flex; gap: 10px; align-items: baseline; margin-bottom: 5px; }
+.tip .th b { color: var(--t1); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; }
+.tip .th span { margin-left: auto; color: var(--t3); }
+.tip .tr { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 6px; }
+.tip .tr > span:last-child { color: var(--t1); overflow-wrap: anywhere; }
+.tip .k { color: var(--t3); }
+.tip .tc { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--l); }
+.tip .tc div { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tip .tc div span:last-child { overflow: hidden; text-overflow: ellipsis; color: var(--t1); }
+.tip .tf { margin-top: 6px; color: var(--t3); }
+.tip .bar { display: inline-block; width: 60px; height: 5px; background: var(--l); border-radius: 3px; margin-left: 6px; vertical-align: middle; overflow: hidden; }
+.tip .bar i { display: block; height: 100%; background: var(--ok); }
+.tip .bar i.hi { background: var(--bad); }
+.tip .bad2 { color: var(--bad); } .tip .ok2 { color: var(--ok); }
 canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edges; }
 .side { display: grid; grid-template-rows: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, .8fr); gap: 10px; min-height: 0; }
 .card { background: var(--p); border: 1px solid var(--l); border-radius: var(--r); padding: 9px 11px; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
@@ -158,7 +173,7 @@ pre.df .ad { color: var(--ok); } pre.df .rm { color: var(--bad); } pre.df .hh { 
 <div class="ban" id="ban" hidden><span>Enjoying ApolloOffice? A star on GitHub helps other people find it.</span><span class="sp"></span><button class="go" id="bStar">Star on GitHub</button><button id="bLater">Later</button></div>
 <div class="tiles" id="tiles"></div>
 <main>
-  <div class="stage" id="stage"><canvas id="cv" width="400" height="258"></canvas><div class="mg" id="mg" hidden></div></div>
+  <div class="stage" id="stage"><canvas id="cv" width="400" height="258"></canvas><div class="mg" id="mg" hidden></div></div><div class="tip" id="tip" hidden></div>
   <div class="side">
     <div class="card"><h2>Queue <span id="qn"></span></h2><div class="bd" id="queue"></div></div>
     <div class="card"><h2>Pull requests <span id="prn"></span></h2><div class="bars" id="bars" title="merges per day, last 30 days"></div><div class="bd" id="prs"></div></div>

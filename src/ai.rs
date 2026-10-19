@@ -92,8 +92,11 @@ pub async fn ask(a: &Ax, o: Ask) -> R<(String, Value)> {
     ask1(a, o).await
 }
 
-pub async fn ask1(a: &Ax, o: Ask) -> R<(String, Value)> {
+pub async fn ask1(a: &Ax, mut o: Ask) -> R<(String, Value)> {
     a.stmd(o.w, &o.md);
+    if let Some(r) = o.rn.as_mut() {
+        r.w = o.w.to_string();
+    }
     match crate::prov::parse(&o.md).0 {
         "cc" => cc(a, o).await,
         "codex" => codex(a, o).await,
@@ -551,7 +554,7 @@ mod t {
             let (a, seen, dd) = fake(fmt).await;
             let mut o = Ask::new("fixer", md.into(), "sys".into(), "go".into());
             o.turns = 5;
-            o.rn = Some(Rn { h: "local".into(), dir: dd.join("repo").display().to_string() });
+            o.rn = Some(Rn { h: "local".into(), dir: dd.join("repo").display().to_string(), w: String::new() });
             let (_, js) = ask1(&a, o).await.unwrap();
             assert_eq!(js["ok"], true, "{fmt}");
             let g = seen.lock().unwrap();

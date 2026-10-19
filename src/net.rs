@@ -3,6 +3,27 @@ use crate::db::now;
 use crate::sh::{gh, ho, hosts, hraw};
 use std::sync::atomic::{AtomicI64, Ordering};
 
+const HW: &str = r#"o=$(uname -s); echo "os $o"
+if [ "$o" = Darwin ]; then echo "cpu $(sysctl -n hw.ncpu)"; echo "load $(sysctl -n vm.loadavg | awk '{print $2}')"; p=$(pagesize); echo "mem $(($(sysctl -n hw.memsize)/1048576)) $(vm_stat | awk -v p=$p '/Pages (free|inactive|speculative)/{gsub(/[.]/,"",$NF);s+=$NF} END{print int(s*p/1048576)}')"
+else echo "cpu $(nproc)"; echo "load $(cut -d' ' -f1 /proc/loadavg)"; echo "mem $(awk '/MemTotal/{t=$2}/MemAvailable/{a=$2}END{print int(t/1024), int(a/1024)}' /proc/meminfo)"; t=$(cat /sys/class/thermal/thermal_zone*/temp | sort -n | tail -1); [ -n "$t" ] && echo "temp $((t/1000))"; fi
+echo "disk $(df -Pk "$HOME" | awk 'NR==2{print int($2/1048576), int($4/1048576)}')"
+echo "up $(uptime | sed 's/.*up *//; s/, *[0-9]* user.*//')""#;
+
+fn hw(o: &str) -> serde_json::Value {
+    let mut v = serde_json::json!({"t": now()});
+    for l in o.lines() {
+        let (k, x) = l.split_once(' ').unwrap_or((l, ""));
+        let ns: Vec<f64> = x.split_whitespace().filter_map(|n| n.parse().ok()).collect();
+        match k {
+            "os" | "up" => v[k] = serde_json::json!(x.trim()),
+            "cpu" | "load" | "temp" if !ns.is_empty() => v[k] = serde_json::json!(ns[0]),
+            "mem" | "disk" if ns.len() == 2 => v[k] = serde_json::json!(ns),
+            _ => {}
+        }
+    }
+    v
+}
+
 static LAST: AtomicI64 = AtomicI64::new(0);
 static FAIL: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, u32>>> = std::sync::LazyLock::new(Default::default);
 
@@ -11,7 +32,13 @@ async fn ck(a: &Ax, k: &str) -> bool {
         "gh" => gh(&["api", "rate_limit", "--jq", ".rate.remaining"], 30).await.is_ok(),
         "an" => a.hc.get("https://api.anthropic.com/").timeout(std::time::Duration::from_secs(15)).send().await.is_ok(),
         h => match ho(a, h) {
-            Some(x) => hraw(&x, if x.dk { "docker inspect -f '{{.State.Running}}' apollo-office | grep -q true" } else { "true" }, 45).await.c == 0,
+            Some(x) => {
+                let o = hraw(&x, &format!("{{ {HW}; }} 2>/dev/null; {}", if x.dk { "docker inspect -f '{{.State.Running}}' apollo-office | grep -q true" } else { "true" }), 45).await;
+                if o.c == 0 {
+                    a.lv.lock().unwrap().hst.insert(h.to_string(), hw(&o.o));
+                }
+                o.c == 0
+            }
             None => false,
         },
     }

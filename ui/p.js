@@ -308,6 +308,7 @@
 
   $("bRepos").onclick = repos;
   $("bHosts").onclick = hosts;
+  A.hosts = hosts;
   $("bSet").innerHTML = A.GEAR;
   $("bSet").onclick = settings;
   let asked = false;

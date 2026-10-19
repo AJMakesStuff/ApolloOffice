@@ -41,6 +41,14 @@ pub fn defs() -> Vec<(&'static str, &'static str, Value)> {
 pub async fn call(a: &Ax, r: &Rn, n: &str, g: &Value) -> Result<String, String> {
     let d = &r.dir;
     let s = |k: &str| g[k].as_str().unwrap_or("").to_string();
+    if !r.w.is_empty() {
+        let x = match n {
+            "sh" => s("cmd"),
+            "grep" => s("pattern"),
+            _ => s("path"),
+        };
+        a.cmd(&r.w, &format!("{}: {n} {}", r.h, x.split_whitespace().collect::<Vec<_>>().join(" ")));
+    }
     match n {
         "read" => {
             let f = g["from"].as_u64().unwrap_or(1).max(1);

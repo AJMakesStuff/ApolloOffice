@@ -213,7 +213,9 @@
     return st;
   };
 
+  let hits = [], hov = null, mx = 0, my = 0;
   const seat = (n, x, y, t, o, lb, hot) => {
+    hits.push({ k: "w:" + n + ":" + (o.q?.id ?? o.vk ?? ""), b: [x - 16, y - 30, x + 18, y + 20], n, q: o.q });
     const st = crab(n, x + 4, y + 2, t, o);
     desk(x, y, SK[n].dark);
     screen(x - 13, y - 11, 11, st, SK[n], t + (o.seed || 0), st === "off");
@@ -222,6 +224,7 @@
 
   const RK = () => (S?.hs || []).filter((h) => h.on_).slice(0, 7).map((h) => [h.id, h.id === "local" ? "ME" : h.id.replace(/[^a-z0-9]/gi, "").slice(0, 2).toUpperCase()]);
   const rack = (x, y, t, h, lb) => {
+    hits.push({ k: "h:" + h, b: [x - 9, y - 41, x + 9, y + 21], h });
     const jbs = (S?.q || []).filter((q) => q.h === h && ["repro", "fix", "ci", "review", "gate", "submit"].includes(q.st));
     const ci = jbs.some((q) => q.st === "ci"), busy = jbs.length > 0;
     const down = S?.o?.net?.[h] === false;
@@ -248,7 +251,7 @@
     seat("scout", 34, 74, t, {}, "SCOUT", S?.w?.scout?.st === "work");
     seat("guard", 74, 74, t, { seed: 3 }, "GUARD", S?.w?.guard?.st === "work");
     const vn = S?.o?.vn ?? (S?.w?.vet?.st === "work" ? 1 : 0);
-    for (let k = 0; k < 3; k++) seat("vet", 114 + k * 36, 74, t, { st: k < vn ? "work" : "idle", seed: 11 + k, fit: k ? k + 2 : 0, fc: k + 4 }, k === 1 ? "VET" : "", k < vn);
+    for (let k = 0; k < 3; k++) seat("vet", 114 + k * 36, 74, t, { st: k < vn ? "work" : "idle", seed: 11 + k, fit: k ? k + 2 : 0, fc: k + 4, vk: k }, k === 1 ? "VET" : "", k < vn);
     seat("watcher", 226, 74, t, { seed: 7 }, "WATCHER", S?.w?.watcher?.st === "work");
     px(270, 128, 120, 1, "#1d1f24");
 
@@ -273,7 +276,7 @@
         K.text(c, NM[i.n].toUpperCase() + (i.c > 1 ? " X" + i.c : ""), i.x - 12, i.y - 36, i.c ? SK[i.n].light : "#4a4d54");
       }
       if (!i.q) seat(i.n, i.x, i.y, t, { seed: i.x }, "", false);
-      else seat(i.n, i.x, i.y, t, { st: "work", seed: i.q.id, fit: (i.q.id * 7) % 9 + 1, fc: i.q.id * 3 }, short(i.q), true);
+      else seat(i.n, i.x, i.y, t, { st: "work", seed: i.q.id, fit: (i.q.id * 7) % 9 + 1, fc: i.q.id * 3, q: i.q }, short(i.q), true);
     }
   };
 
@@ -314,6 +317,7 @@
     const t = (performance.now() - t0) / 1000;
     c.imageSmoothingEnabled = false;
     fc.imageSmoothingEnabled = false;
+    hits = [];
     floor();
     board(t);
     radio(292, 9, t);
@@ -324,6 +328,11 @@
     RK().forEach(([h, lb], i) => rack(272 + i * 19, 100, t, h, lb));
     teams(t);
     confetti(t);
+    const hh = hov && hits.find((h) => h.k === hov);
+    if (hh) {
+      const [x0, y0, x1, y1] = hh.b, cl = "#75746f";
+      for (const [x, y, dx, dy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x0, y1, 1, -1], [x1, y1, -1, -1]]) { px(dx > 0 ? x : x - 3, y, 4, 1, cl); px(x - (dx > 0 ? 0 : 1), dy > 0 ? y : y - 3, 1, 4, cl); }
+    }
     if (S?.o?.off) { c.globalAlpha = 0.25; px(0, 35, VW, VH - 35, "#000"); c.globalAlpha = 1; }
     const dp = window.devicePixelRatio || 1, sg = $("stage");
     const sc = Math.max(1, Math.floor(Math.min((sg.clientWidth - 2) * dp / VW, (sg.clientHeight - 2) * dp / VH) * 2) / 2);
@@ -416,7 +425,7 @@
     document.body.classList.toggle("sb", !!S.star);
   };
 
-  const apply = (s) => { if (!s || s.error) return; S = s; last = performance.now(); err = 0; tiles(); lists(); chips(); window.AO.S = s; window.AO.onState && window.AO.onState(s); };
+  const apply = (s) => { if (!s || s.error) return; S = s; last = performance.now(); err = 0; tiles(); lists(); chips(); tip(); window.AO.S = s; window.AO.onState && window.AO.onState(s); };
   window.AO.apply = apply;
 
   document.addEventListener("click", (e) => {
@@ -433,6 +442,60 @@
   $("bStar").onclick = (e) => { e.target.disabled = true; post({ op: "star" }, "/api/star").then((r) => { e.target.disabled = false; if (r.error) { e.target.textContent = "Could not star, try again"; return; } apply(r); }); };
   $("bLater").onclick = () => post({ op: "later" }, "/api/star").then(apply);
 
+  const bar = (v, mx) => { const p = Math.max(0, Math.min(100, (v / mx) * 100)); return `<span class="bar"><i class="${p > 85 ? "hi" : ""}" style="width:${p.toFixed(0)}%"></i></span>`; };
+  const gb = (m) => (m / 1024).toFixed(m < 10240 ? 1 : 0);
+  const tr = (k, v) => `<div class="tr"><span class="k">${k}</span><span>${v}</span></div>`;
+  const wtip = (h) => {
+    const w = S.w[h.n] || {}, q = h.q || (w.job && S.q.find((x) => x.id === w.job));
+    const st = w.hold ? "held" : S.o.man || S.o.pause ? "paused" : h.q ? "work" : w.st || "idle";
+    const cs = (w.cmds || []).length ? w.cmds.slice(-4).reverse() : S.ev.filter((e) => e.w === h.n).slice(0, 3).map((e) => [e.t, e.m]);
+    return `<div class="th"><b>${NM[h.n]}</b><span>${esc(mdn(w.md))}</span></div>`
+      + tr("status", esc(st) + (w.tk ? ` · ${kt(w.tk)} tok today` : ""))
+      + (q ? tr("job", `${esc(rn(q))} · ${esc(q.title)} <span class="k">${esc(q.st)}</span>`) : "")
+      + (w.say && !h.q ? tr("says", esc(w.say) + ` <span class="k">${ago(w.t)}</span>`) : "")
+      + (cs.length ? `<div class="tc">${cs.map(([t, c]) => `<div><span class="k">${ago(t)}</span><span>${esc(c)}</span></div>`).join("")}</div>` : "")
+      + (q ? `<div class="tf">click to open the job</div>` : "");
+  };
+  const htip = (h) => {
+    const x = (S.hs || []).find((y) => y.id === h.h) || {}, m = S.hst?.[h.h], down = S.o.net?.[h.h] === false;
+    const js = S.q.filter((q) => q.h === h.h && ["repro", "fix", "ci", "review", "gate", "submit"].includes(q.st));
+    let r = `<div class="th"><b>${esc(h.h === "local" ? "this computer" : h.h)}</b><span>${x.dk ? "Docker" : "no Docker"}</span></div>`
+      + tr("status", down ? `<span class="bad2">offline</span>` : `<span class="ok2">online</span> · ${js.length}/${x.ln || 0} lanes busy`);
+    if (m) {
+      if (m.cpu) r += tr("cpu", `${m.cpu} cores · load ${m.load ?? "?"}${m.load != null ? bar(m.load, m.cpu) : ""}`);
+      if (m.mem) r += tr("ram", `${gb(m.mem[0] - m.mem[1])} / ${gb(m.mem[0])} GB${bar(m.mem[0] - m.mem[1], m.mem[0])}`);
+      if (m.disk) r += tr("disk", `${m.disk[1]} GB free of ${m.disk[0]}${bar(m.disk[0] - m.disk[1], m.disk[0])}`);
+      if (m.temp != null) r += tr("temp", `<span class="${m.temp >= 85 ? "bad2" : ""}">${m.temp} °C</span>`);
+      if (m.up) r += tr("up", esc(m.up) + ` <span class="k">· seen ${ago(m.t)} ago</span>`);
+    } else r += tr("", `<span class="k">no hardware data yet</span>`);
+    if (js.length) r += `<div class="tc">${js.map((q) => `<div><span class="k">${esc(q.st)}</span><span>${esc(rn(q))} · ${esc(q.title)}</span></div>`).join("")}</div>`;
+    return r + `<div class="tf">click to edit machines</div>`;
+  };
+  const tip = () => {
+    const el = $("tip"), h = hov && hits.find((x) => x.k === hov);
+    if (!h || !S) { el.hidden = true; return; }
+    el.innerHTML = h.h ? htip(h) : wtip(h);
+    el.hidden = false;
+    const r = el.getBoundingClientRect(), W = window.innerWidth, H = window.innerHeight;
+    el.style.left = Math.min(mx + 16, W - r.width - 8) + "px";
+    el.style.top = (my + 16 + r.height > H - 8 ? Math.max(8, my - r.height - 12) : my + 16) + "px";
+  };
+  const at = (e) => { const r = cv.getBoundingClientRect(), x = (e.clientX - r.left) * VW / r.width, y = (e.clientY - r.top) * VH / r.height; return hits.slice().reverse().find((h) => x >= h.b[0] && x <= h.b[2] && y >= h.b[1] && y <= h.b[3]); };
+  cv.addEventListener("mousemove", (e) => {
+    mx = e.clientX; my = e.clientY;
+    const h = at(e);
+    hov = h ? h.k : null;
+    cv.style.cursor = h && (h.h || h.q || (S?.w?.[h.n]?.job)) ? "pointer" : "";
+    tip();
+  });
+  cv.addEventListener("mouseleave", () => { hov = null; cv.style.cursor = ""; tip(); });
+  cv.addEventListener("click", (e) => {
+    const h = at(e);
+    if (!h) return;
+    if (h.h) return window.AO.hosts && window.AO.hosts();
+    const id = h.q?.id || S?.w?.[h.n]?.job;
+    if (id && S.q.some((q) => q.id === id)) window.AO.job && window.AO.job(id);
+  });
   let wok = false;
   const live = () => {
     let w;

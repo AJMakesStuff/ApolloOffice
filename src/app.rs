@@ -18,6 +18,7 @@ pub struct Wk {
     pub hold: bool,
     pub t: i64,
     pub mood: String,
+    pub cmds: Vec<(i64, String)>,
 }
 
 #[derive(Clone, Serialize, Default)]
@@ -47,12 +48,14 @@ pub struct Lv {
     pub fl: Vec<Fl>,
     pub ln: HashMap<i64, String>,
     pub cil: HashMap<i64, String>,
+    pub hst: HashMap<String, Value>,
 }
 
 #[derive(Clone)]
 pub struct Rn {
     pub h: String,
     pub dir: String,
+    pub w: String,
 }
 
 pub struct App {
@@ -225,6 +228,17 @@ impl App {
             x.job = j;
             x.mood = mood.into();
             x.t = now();
+        }
+        chg();
+    }
+
+    pub fn cmd(&self, w: &str, s: &str) {
+        if let Some(x) = self.lv.lock().unwrap().w.get_mut(w) {
+            x.cmds.push((now(), s.chars().take(160).collect()));
+            let n = x.cmds.len();
+            if n > 5 {
+                x.cmds.drain(..n - 5);
+            }
         }
         chg();
     }

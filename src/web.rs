@@ -77,9 +77,9 @@ fn state(a: &Ax) -> Value {
     for t in a.db.all("select w, tin+tout n from tok where day=?", pa![d]) {
         tk[t["w"].as_str().unwrap_or("")] = t["n"].clone();
     }
-    let (w, o, fl, ln, cil) = {
+    let (w, o, fl, ln, cil, hst) = {
         let l = a.lv.lock().unwrap();
-        (json!(l.w), json!(l.o), json!(l.fl.iter().filter(|f| now() - f.t < 8000).collect::<Vec<_>>()), json!(l.ln.iter().map(|(k, v)| (k.to_string(), v.clone())).collect::<std::collections::HashMap<_, _>>()), json!(l.cil.iter().map(|(k, v)| (k.to_string(), v.clone())).collect::<std::collections::HashMap<_, _>>()))
+        (json!(l.w), json!(l.o), json!(l.fl.iter().filter(|f| now() - f.t < 8000).collect::<Vec<_>>()), json!(l.ln.iter().map(|(k, v)| (k.to_string(), v.clone())).collect::<std::collections::HashMap<_, _>>()), json!(l.cil.iter().map(|(k, v)| (k.to_string(), v.clone())).collect::<std::collections::HashMap<_, _>>()), json!(l.hst))
     };
     let mut wv = w;
     for x in WS {
@@ -91,7 +91,7 @@ fn state(a: &Ax) -> Value {
     let lm = a.db.kg("lm");
     json!({
         "t": now(), "v": crate::app::V,
-        "o": o, "w": wv, "fl": fl, "ln": ln, "cil": cil,
+        "o": o, "w": wv, "fl": fl, "ln": ln, "cil": cil, "hst": hst,
         "hs": a.db.all("select id, ln, dk, on_ from hs order by id='local' desc, id", pa![]),
         "q": a.db.all("select id,repo,num,kind,title,url,st,why,pr,t0,t1,json_extract(d,'$.h') h from jobs where st not in ('done','drop') order by st='approve' desc, st='vet', id limit 60", pa![]),
         "dn": a.db.all("select id,repo,num,kind,title,url,st,why,pr,t1 from jobs where st in ('done','drop') order by t1 desc limit 25", pa![]),
