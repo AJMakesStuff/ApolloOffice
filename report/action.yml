@@ -11,7 +11,7 @@ inputs:
     description: Repository the report is for
     default: ${{ github.repository }}
   all-branches:
-    description: Also report failures on branches other than the default branch
+    description: Also report failures on other branches and from pull requests of this repository (never from forks)
     default: "false"
 runs:
   using: composite
@@ -30,11 +30,14 @@ runs:
         RUN_SHA: ${{ github.event.workflow_run.head_sha }}
         RUN_END: ${{ github.event.workflow_run.conclusion }}
         DEF_BRANCH: ${{ github.event.repository.default_branch }}
+        RUN_EVENT: ${{ github.event.workflow_run.event }}
+        RUN_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
       run: |
         set -euo pipefail
         if [ -z "$RUN_ID" ]; then echo "::error::run this action from a workflow_run trigger"; exit 1; fi
         if [ "$RUN_END" != "failure" ]; then echo "run did not fail, nothing to report"; exit 0; fi
-        if [ "$AO_ALL" != "true" ] && [ "$RUN_BRANCH" != "$DEF_BRANCH" ]; then echo "failure on $RUN_BRANCH, not the default branch, skipped"; exit 0; fi
+        if [ "$RUN_REPO" != "$GITHUB_REPOSITORY" ]; then echo "run comes from $RUN_REPO, not this repository, skipped"; exit 0; fi
+        if [ "$AO_ALL" != "true" ] && { [ "$RUN_BRANCH" != "$DEF_BRANCH" ] || [ "$RUN_EVENT" != "push" ]; }; then echo "failure from $RUN_EVENT on $RUN_BRANCH, not a push to the default branch, skipped"; exit 0; fi
         jobs=$(gh run view "$RUN_ID" -R "$GITHUB_REPOSITORY" --json jobs --jq '[.jobs[] | select(.conclusion=="failure") | .name + " (" + ([.steps[] | select(.conclusion=="failure") | .name] | join(", ")) + ")"] | join("; ")')
         logs=$(gh run view "$RUN_ID" -R "$GITHUB_REPOSITORY" --log-failed 2>/dev/null | tail -c 15000 || true)
         body=$(printf 'The workflow "%s" failed on %s (commit %s).\n\nFailed jobs and steps: %s\n\nRun: %s' "$RUN_NAME" "$RUN_BRANCH" "$RUN_SHA" "$jobs" "$RUN_URL")
