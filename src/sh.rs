@@ -382,7 +382,7 @@ WORKDIR /work
 
 pub fn dkup(h: &Ho, cpu: i64) -> String {
     format!(
-        "command -v docker >/dev/null || {{ echo 'docker is not installed'; exit 2; }}\ndocker info >/dev/null 2>&1 || {{ echo 'docker is not running'; exit 2; }}\nif ! docker image inspect {IM} >/dev/null 2>&1; then docker build -q -t {IM} - <<'DOCKERFILE'\n{DF}DOCKERFILE\nfi\nr=$(docker inspect -f '{{{{.State.Running}}}}' {CT} 2>/dev/null)\nif [ -z \"$r\" ]; then docker run -d --name {CT} --restart unless-stopped --cpus {cpu} -v apollo-office-work:/work -v apollo-office-cargo:/usr/local/cargo/registry {IM} sleep infinity >/dev/null || exit 3; elif [ \"$r\" != true ]; then docker start {CT} >/dev/null || exit 3; fi\ndocker update --cpus {cpu} {CT} >/dev/null 2>&1\necho ok {}\n",
+        "command -v docker >/dev/null || {{ echo 'docker is not installed'; exit 2; }}\ndocker info >/dev/null 2>&1 || {{ echo 'docker is not running'; exit 2; }}\nif ! docker image inspect {IM} >/dev/null 2>&1; then docker build -q -t {IM} - <<'DOCKERFILE'\n{DF}DOCKERFILE\nfi\nr=$(docker inspect -f '{{{{.State.Running}}}}' {CT} 2>/dev/null)\nif [ -z \"$r\" ]; then docker run -d --name {CT} --restart unless-stopped --cpus {cpu} -v apollo-office-work:/work -v apollo-office-cargo:/usr/local/cargo/registry {IM} sleep infinity >/dev/null 2>&1 || [ \"$(docker inspect -f '{{{{.State.Running}}}}' {CT} 2>/dev/null)\" = true ] || docker start {CT} >/dev/null || exit 3; elif [ \"$r\" != true ]; then docker start {CT} >/dev/null || exit 3; fi\ndocker update --cpus {cpu} {CT} >/dev/null 2>&1\necho ok {}\n",
         h.id
     )
 }
