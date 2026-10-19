@@ -1432,6 +1432,9 @@ async fn pick(a: &Ax, h: &str) -> Option<i64> {
         if a.act.lock().unwrap().contains(&format!("{r} {h}")) || a.lk.lock().unwrap().contains(&id) {
             continue;
         }
+        if j["kind"] == "hunt" && a.hold("hunter") {
+            continue;
+        }
         if pin && d["h"].as_str().map(|x| x != h).unwrap_or(false) {
             continue;
         }
@@ -1510,7 +1513,7 @@ async fn lane(a: Ax, h: String, k: i64) {
             sl(60_000).await;
             continue;
         }
-        while mk_hunt(&a) {}
+        while !a.hold("hunter") && mk_hunt(&a) {}
         let Some(id) = pick(&a, &h).await else {
             sl(20_000).await;
             continue;
