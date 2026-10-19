@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ApolloOffice</title>
+<script src="th.js"></script>
 <style>
 :root {
   --g: #0b0c0e;
@@ -22,11 +23,10 @@
   --s: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif;
   color-scheme: dark;
 }
-@media (prefers-color-scheme: light) {
-  :root { --g: #f4f3ef; --p: #ffffff; --h: #efeee9; --f: #f1f0ec; --l: #dddbd4; --t1: #1b1a18; --t2: #55534d; --t3: #8a8882; --ok: #2f8a3c; --bad: #c2443a; --info: #2878a8; color-scheme: light; }
-  button.go, button.pri { color: #fff; }
-  #dr { background: rgba(0,0,0,.25); }
-}
+:root[data-th=light] { --g: #f4f3ef; --p: #ffffff; --h: #efeee9; --f: #f1f0ec; --l: #dddbd4; --t1: #1b1a18; --t2: #55534d; --t3: #8a8882; --ok: #2f8a3c; --bad: #c2443a; --info: #2878a8; color-scheme: light; }
+[data-th=light] button.go, [data-th=light] button.pri { color: #fff; }
+[data-th=light] button.pri:hover { background: #000; }
+[data-th=light] #dr { background: rgba(0,0,0,.25); }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: var(--g); color: var(--t1); font: 13px/1.4 var(--s); }
 body { padding: 12px 14px; display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 10px; }
@@ -41,6 +41,14 @@ h1 { font: 600 14px/1 var(--m); letter-spacing: .12em; text-transform: uppercase
 .chip.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
 .chip.info { color: var(--info); border-color: color-mix(in srgb, var(--info) 40%, transparent); }
 .sp { flex: 1; }
+button.hc { cursor: pointer; flex: none; display: inline-flex; gap: 5px; align-items: center; }
+button.hc:hover { background: var(--f); }
+.hc i { width: 7px; height: 7px; border-radius: 2px; background: var(--ok); display: inline-block; }
+.hc i.no { background: var(--bad); }
+.bkb { display: flex; align-items: center; gap: 6px; padding: 0 0 6px; font: 11px var(--m); color: var(--t3); }
+.bkb .ck { font: 11px var(--m); }
+.row input.bk { margin: 0 4px 0 0; }
+.row:has(input.bk) { grid-template-columns: auto 64px minmax(0, 1fr) auto; }
 .mt { display: inline-flex; align-items: center; gap: 7px; }
 .mt .bar { width: 46px; height: 5px; background: var(--l); border-radius: 3px; overflow: hidden; flex: none; }
 .mt .bar i { display: block; height: 100%; background: var(--t2); }
@@ -146,6 +154,9 @@ input:focus, textarea:focus, select:focus { outline: 1px solid var(--info); bord
 .ck b { color: var(--t1); font-weight: 500; }
 .ok2, .ck b.ok2 { color: var(--ok); } .bad2, .ck b.bad2 { color: var(--bad); }
 [hidden] { display: none !important; }
+.fb { position: fixed; inset: 0; z-index: 100; pointer-events: none; overflow: hidden; }
+.fbg { position: absolute; left: 0; top: 0; width: 56px; height: 104px; margin: -52px 0 0 -28px; image-rendering: pixelated; filter: drop-shadow(0 6px 6px rgba(0,0,0,.45)); }
+.fbw { position: absolute; inset: 0; background: #fff; opacity: 0; }
 .acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .msg { font: 12px var(--m); margin-top: 8px; color: var(--t2); white-space: pre-wrap; }
 .msg.bad2 { color: var(--bad); }
@@ -154,25 +165,69 @@ table.tb { width: 100%; border-collapse: collapse; font: 11px/1.4 var(--m); }
 table.tb th { text-align: left; color: var(--t3); font-weight: 400; padding: 3px 6px 5px 0; border-bottom: 1px solid var(--l); white-space: nowrap; }
 table.tb td { padding: 4px 6px 4px 0; border-bottom: 1px solid var(--l); white-space: nowrap; }
 table.tb td.n, table.tb th.n { text-align: right; }
+.dv { border: 1px solid var(--l); border-radius: 6px; background: var(--g); }
+.dvh { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--l); font: 11px var(--m); color: var(--t2); }
+.dv details { border-bottom: 1px solid var(--l); }
+.dv details:last-child { border-bottom: 0; }
+.dv summary { cursor: pointer; padding: 6px 8px; font: 11px var(--m); display: flex; gap: 8px; align-items: center; background: var(--h); }
+.dv summary .fn { flex: 1; color: var(--t1); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+table.dt { width: 100%; border-collapse: collapse; font: 11px/1.45 var(--m); }
+table.dt td { padding: 0 6px; vertical-align: top; }
+table.dt td.ln { color: var(--t3); text-align: right; width: 1%; white-space: nowrap; user-select: none; }
+table.dt td.cd { white-space: pre; color: var(--t1); }
+table.dt.sp2 td.cd { width: 50%; white-space: pre-wrap; word-break: break-all; }
+table.dt tr.hh td { color: var(--info); padding: 3px 6px; background: color-mix(in srgb, var(--info) 8%, transparent); }
+table.dt tr.ad td.cd, table.dt td.cd.ad { background: color-mix(in srgb, var(--ok) 13%, transparent); }
+table.dt tr.rm td.cd, table.dt td.cd.rm { background: color-mix(in srgb, var(--bad) 13%, transparent); }
+table.dt td.cd.e { background: var(--h); }
+table.dt mark { color: inherit; border-radius: 2px; }
+table.dt tr.ad mark, table.dt td.ad mark { background: color-mix(in srgb, var(--ok) 38%, transparent); }
+table.dt tr.rm mark, table.dt td.rm mark { background: color-mix(in srgb, var(--bad) 38%, transparent); }
+.dz .box { border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+.dz h4 { color: var(--bad); }
+.dzr { display: flex; gap: 12px; align-items: center; padding: 8px 0; border-top: 1px solid var(--l); }
+.dzr:first-child { border-top: 0; padding-top: 0; }
+.dzr > div { flex: 1; font-size: 12px; }
+.dzr .hint { margin-top: 2px; }
 pre.df { font: 11px/1.45 var(--m); background: var(--g); border: 1px solid var(--l); border-radius: 6px; padding: 8px 10px; overflow: auto; max-height: 46vh; margin: 0; white-space: pre; }
 pre.df .ad { color: var(--ok); } pre.df .rm { color: var(--bad); } pre.df .hh { color: var(--info); } pre.df .fh { color: var(--t1); font-weight: 600; }
 .warn { border: 1px solid color-mix(in srgb, var(--bad) 50%, transparent); color: var(--t1); border-radius: 6px; padding: 8px 10px; font-size: 12px; margin: 8px 0; }
 .empty { color: var(--t3); font: 12px var(--m); padding: 4px 0; }
-@media (prefers-color-scheme: light) { button.go, button.pri { color: #fff; } button.pri:hover { background: #000; } }
 @media (max-width: 1100px) { .tiles { grid-template-columns: repeat(5, minmax(0, 1fr)); } .tile { height: 56px; } .tile .sy { -webkit-line-clamp: 1; } }
 @media (max-width: 860px) { body { grid-template-rows: auto auto minmax(0, 1.1fr); } body.sb { grid-template-rows: auto auto auto minmax(0, 1.1fr); } main { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); } .side { grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0, 1fr); } .side .card:last-child { display: none; } .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } #cQ, #cHo { display: none; } }
+@media (max-width: 700px) {
+  html, body { height: auto; overflow: auto; }
+  body { display: block; padding: 10px; }
+  header { flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  header h1 { width: 100%; }
+  .tiles, .stage, #cHo, #cQ { display: none !important; }
+  main { display: block; }
+  .side { display: flex; flex-direction: column; gap: 10px; }
+  .card { max-height: none; }
+  .side .card:last-child { display: flex; max-height: 50vh; }
+  .bd { overflow: visible; }
+  .row { padding: 8px 0; }
+  button.go { padding: 6px 10px; font-size: 11px; }
+  .ban { margin-bottom: 10px; }
+  #dr .pn { width: 100%; border-left: 0; }
+  .fm { grid-template-columns: 1fr; }
+  .fm .hint, .hint { grid-column: 1; }
+  .dzr { flex-direction: column; align-items: stretch; }
+}
 </style>
 </head>
 <body>
 <header>
   <h1>ApolloOffice</h1>
   <span class="chip" id="cNet">…</span>
+  <button class="chip hc" id="cH" hidden></button>
   <span class="chip" id="cHo"></span>
   <span class="chip" id="cQ"></span>
   <span class="sp"></span>
   <button id="bCost">Costs</button>
   <button id="bRepos">Repos</button>
   <button id="bHosts">Machines</button>
+  <button id="bTh" class="ic" title="Light or dark" aria-label="Light or dark"></button>
   <button id="bSet" class="ic" title="Settings" aria-label="Settings"></button>
   <button id="bPause">Pause office</button>
 </header>

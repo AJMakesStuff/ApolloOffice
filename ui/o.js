@@ -55,7 +55,13 @@
     return "#" + [y, y, y].map((v) => v.toString(16).padStart(2, "0")).join("");
   };
   const dim = (sk) => ({ body: gray(sk.body, 0.6), dark: gray(sk.dark, 0.6), light: gray(sk.light, 0.6) });
-  const px = (x, y, w, h, col) => { c.fillStyle = col; c.fillRect(Math.round(x), Math.round(y), w, h); };
+  const LT = { "#0d0e10": "#e7e3d9", "#121317": "#dcd7cb", "#1d1f24": "#cbc5b8", "#111215": "#e0dcd1", "#0f1013": "#dfdace", "#3d4045": "#a19c90", "#4a4d54": "#8d887d", "#2a2c32": "#aaa396", "#1c1e22": "#c4bdaf", "#25272c": "#d2ccbf", "#16171a": "#958f82", "#141518": "#b1ab9e", "#232529": "#a7a194", "#26282d": "#bab4a7", "#75746f": "#8d887d", "#b9bcc2": "#55534d", "#2a1715": "#d9b3ad" };
+  const lt = () => document.documentElement.dataset.th === "light";
+  const C = (k) => (lt() && LT[k]) || k;
+  const hl = (n) => (lt() ? SK[n].dark : SK[n].light);
+  window.AO.hl = hl;
+  const px = (x, y, w, h, col) => { c.fillStyle = C(col); c.fillRect(Math.round(x), Math.round(y), w, h); };
+  const tx = (s, x, y, col) => K.text(c, s, x, y, C(col));
   const party = () => S?.lm && S.t - S.lm.t < 180000;
 
   const floor = () => {
@@ -66,26 +72,26 @@
     px(256, 38, 140, 84, "#0f1013");
     px(256, 38, 140, 1, "#1d1f24");
     px(256, 38, 1, 84, "#1d1f24");
-    K.text(c, "MACHINES", 262, 42, "#3d4045");
+    tx("MACHINES", 262, 42, "#3d4045");
     px(158, 6, 84, 22, "#0a0b0d");
     px(158, 6, 84, 1, "#24272d");
   };
 
   const board = (t) => {
     const s = S;
-    K.text(c, "APOLLO OFFICE", 162, 9, "#8a8d94");
+    tx("APOLLO OFFICE", 162, 9, "#8a8d94");
     if (!s) return;
     const q = (s.n.ready || 0) + (s.n.repro || 0) + (s.n.fix || 0) + (s.n.ci || 0) + (s.n.review || 0) + (s.n.gate || 0) + (s.n.submit || 0);
     const op = s.pr.filter((p) => p.st === "open").length;
-    if (s.o.off) { if (Math.floor(t * 2) % 2) K.text(c, "OFFLINE", 164, 18, "#e0675a"); }
-    else if (party()) { if (Math.floor(t * 3) % 2) K.text(c, "MERGED!", 164, 18, "#5cbf6a"); }
-    else K.text(c, `Q ${q} PR ${op}`, 164, 18, "#5c5f66");
+    if (s.o.off) { if (Math.floor(t * 2) % 2) tx("OFFLINE", 164, 18, "#e0675a"); }
+    else if (party()) { if (Math.floor(t * 3) % 2) tx("MERGED!", 164, 18, "#5cbf6a"); }
+    else tx(`Q ${q} PR ${op}`, 164, 18, "#5c5f66");
     const live = !s.o.off && !s.o.pause && !s.o.man;
     const ap = (s.n.approve || 0);
-    if (ap) { px(300, 136, 70, 16, "#131a14"); px(300, 136, 70, 1, "#3d9149"); K.text(c, `APPROVE ${ap}`, 304, 141, Math.floor(t * 1.5) % 2 ? "#94dd9e" : "#5cbf6a"); }
+    if (ap) { px(300, 136, 70, 16, "#131a14"); px(300, 136, 70, 1, "#3d9149"); tx(`APPROVE ${ap}`, 304, 141, Math.floor(t * 1.5) % 2 ? "#94dd9e" : "#5cbf6a"); }
     px(234, 10, 3, 3, live ? (Math.floor(t * 1.5) % 2 ? "#5cbf6a" : "#3d9149") : s.o.off ? "#e0675a" : "#8d9199");
     const d = new Date();
-    K.text(c, `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`, 6, 9, "#4a4d54");
+    tx(`${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`, 6, 9, "#4a4d54");
   };
 
   const PLANE = [["w....", "www..", "wwwww", ".gww.", "..g.."], ["..g..", ".gww.", "wwwww", "www..", "w...."]];
@@ -107,7 +113,7 @@
         if (j % 2) continue;
         const [tx, ty] = pos(u);
         c.globalAlpha = (1 - j / 15) * 0.8;
-        px(tx, ty, 1, 1, SK[f.a].light);
+        px(tx, ty, 1, 1, hl(f.a));
       }
       c.globalAlpha = 1;
       const [x, y] = pos(e), [nx] = pos(Math.min(1, e + 0.02));
@@ -209,7 +215,7 @@
     if (st === "sleep" && !pt) {
       const k = ((t + sd) * 0.6) % 1;
       c.globalAlpha = 1 - k;
-      K.text(c, "Z", x + 8 + k * 4, y - 26 - k * 8, "#75746f");
+      tx("Z", x + 8 + k * 4, y - 26 - k * 8, "#75746f");
       c.globalAlpha = 1;
     }
     return st;
@@ -221,7 +227,7 @@
     const st = crab(n, x + 4, y + 2, t, o);
     desk(x, y, SK[n].dark);
     screen(x - 13, y - 11, 11, st, SK[n], t + (o.seed || 0), st === "off");
-    if (lb) K.text(c, lb, x - (K.textWidth(lb) >> 1), y + 16, hot ? SK[n].light : "#4a4d54");
+    if (lb) tx(lb, x - (K.textWidth(lb) >> 1), y + 16, hot ? hl(n) : "#4a4d54");
   };
 
   const RL = (id) => { if (id === "local") return "ME"; const m = id.match(/^([a-z])[a-z]*[-_ ]?(\d+)$/i); return (m ? m[1] + m[2] : id.replace(/[^a-z0-9]/gi, "")).slice(0, 3).toUpperCase(); };
@@ -244,8 +250,8 @@
     }
     const lamp = down ? (Math.floor(t * 2) % 2 ? "#e0675a" : "#4a1f1b") : ci ? (Math.floor(t * 2) % 2 ? "#4fb3e0" : "#2f86b0") : busy ? "#d97757" : "#3d4045";
     px(x - 2, y - 39, 4, 4, lamp);
-    if (jbs.length > 1) K.text(c, String(jbs.length), x - 1, y - 46, "#b9bcc2");
-    K.text(c, lb, x - (K.textWidth(lb) >> 1), y + 15, down ? "#e0675a" : busy ? "#b9bcc2" : "#4a4d54");
+    if (jbs.length > 1) tx(String(jbs.length), x - 1, y - 46, "#b9bcc2");
+    tx(lb, x - (K.textWidth(lb) >> 1), y + 15, down ? "#e0675a" : busy ? "#b9bcc2" : "#4a4d54");
   };
 
   const short = (q) => {
@@ -289,7 +295,7 @@
     for (const i of it) {
       if (i.f) {
         AN[i.n] = [i.x, i.y];
-        K.text(c, NM[i.n].toUpperCase() + (i.c > 1 ? " X" + i.c : ""), i.x - 12, i.y - 36, i.c ? SK[i.n].light : "#4a4d54");
+        tx(NM[i.n].toUpperCase() + (i.c > 1 ? " X" + i.c : ""), i.x - 12, i.y - 36, i.c ? hl(i.n) : "#4a4d54");
       }
       if (!i.q) seat(i.n, i.x, i.y, t, { seed: i.x }, "", false);
       else seat(i.n, i.x, i.y, t, { st: "work", seed: i.q.id, fit: (i.q.id * 7) % 9 + 1, fc: i.q.id * 3, q: i.q }, short(i.q), true);
@@ -409,12 +415,16 @@
   };
 
   const rn = (j) => (j.repo.split("/")[1] || j.repo) + (j.num ? "#" + j.num : "");
-  const jrow = (j, x) => `<div class="row${j.st === "approve" ? " apr" : ""}"><span class="pill ${STC[j.st] || ""}">${esc(j.kind !== "fix" ? j.kind + "·" + j.st : j.st)}</span><div class="ti"><a class="a" href="#" data-j="${j.id}">${esc(j.title)}</a><div class="w">${esc(j.st === "ci" && S.cil[j.id] ? S.cil[j.id] : j.why || "")}</div></div><span class="rp">${esc(rn(j))}${j.st === "approve" ? ` <button class="go" data-j="${j.id}">review</button>` : ""}${x && j.st !== "approve" ? ` <button class="x" data-d="${j.id}" title="drop">✕</button>` : ""}${!x && j.st === "drop" && j.kind === "fix" ? ` <button class="x" data-rq="${j.id}" title="try again">↻</button>` : ""}</span></div>`;
+  const sel = new Set();
+  const jrow = (j, x) => `<div class="row${j.st === "approve" ? " apr" : ""}">${j.st === "approve" && x ? `<input type="checkbox" class="bk" data-k="${j.id}" ${sel.has(j.id) ? "checked" : ""} aria-label="select">` : ""}<span class="pill ${STC[j.st] || ""}">${esc(j.kind !== "fix" ? j.kind + "·" + j.st : j.st)}</span><div class="ti"><a class="a" href="#" data-j="${j.id}">${esc(j.title)}</a><div class="w">${esc(j.st === "ci" && S.cil[j.id] ? S.cil[j.id] : j.why || "")}</div></div><span class="rp">${esc(rn(j))}${j.st === "approve" ? ` <button class="go" data-j="${j.id}">review</button>` : ""}${x && j.st !== "approve" ? ` <button class="x" data-d="${j.id}" title="drop">✕</button>` : ""}${!x && j.st === "drop" && j.kind === "fix" ? ` <button class="x" data-rq="${j.id}" title="try again">↻</button>` : ""}</span></div>`;
 
   const lists = () => {
     const q = S.q;
     $("qn").textContent = q.length ? q.length + " jobs" : "";
-    $("queue").innerHTML = (q.length ? q.slice(0, 16).map((j) => jrow(j, true)).join("") : `<div class="empty">nothing waiting</div>`) + (S.dn.length ? `<div class="sub">recent</div>` + S.dn.slice(0, 12).map((j) => jrow(j, false)).join("") : "");
+    const aps = q.filter((j) => j.st === "approve").map((j) => j.id);
+    for (const k of [...sel]) if (!aps.includes(k)) sel.delete(k);
+    const bk = aps.length > 1 ? `<div class="bkb"><label class="ck"><input type="checkbox" id="bkA" ${sel.size === aps.length ? "checked" : ""}> all ${aps.length}</label><span class="sp"></span>${sel.size ? `<button class="go" id="bkS">submit ${sel.size}</button><button class="dng" id="bkD">drop ${sel.size}</button>` : `<span class="k">select pull requests to submit together</span>`}</div>` : "";
+    $("queue").innerHTML = bk + (q.length ? q.slice(0, 16).map((j) => jrow(j, true)).join("") : `<div class="empty">nothing waiting</div>`) + (S.dn.length ? `<div class="sub">recent</div>` + S.dn.slice(0, 12).map((j) => jrow(j, false)).join("") : "");
     const op = S.pr.filter((p) => p.st === "open").length, mg = S.pr.filter((p) => p.st === "merged").length;
     $("prn").textContent = `${op} open · ${mg} merged`;
     $("prs").innerHTML = S.pr.length ? S.pr.slice(0, 16).map((p) => `<div class="row"><span class="pill ${p.st === "merged" ? "ok" : p.st === "closed" ? "bad" : "info"}">${esc(p.st)}</span><div class="ti"><a class="a" href="#" data-u="${esc(p.url)}">${esc(p.title)}</a></div><span class="rp">${esc(rn({ repo: p.repo, num: p.num }))}</span></div>`).join("") : `<div class="empty">no pull requests yet</div>`;
@@ -422,7 +432,7 @@
     const days = [...Array(30)].map((_, i) => new Date(Date.now() - (29 - i) * 86400000).toISOString().slice(0, 10));
     const mx = Math.max(1, ...days.map((d) => m[d] || 0));
     $("bars").innerHTML = days.map((d) => `<i class="${m[d] ? "" : "z"}" style="height:${m[d] ? Math.max(8, (m[d] / mx) * 100) : 2}%" title="${d}: ${m[d] || 0}"></i>`).join("");
-    $("log").innerHTML = S.ev.slice(0, 30).map((e) => `<div><span class="tm">${hm(e.t)}</span><span style="color:${SK[e.w]?.light || "inherit"}">${esc(NM[e.w] || e.w)}</span><span>${esc(e.m)}</span></div>`).join("");
+    $("log").innerHTML = S.ev.slice(0, 30).map((e) => `<div><span class="tm">${hm(e.t)}</span><span style="color:${SK[e.w] ? hl(e.w) : "inherit"}">${esc(NM[e.w] || e.w)}</span><span>${esc(e.m)}</span></div>`).join("");
   };
 
   const chips = () => {
@@ -441,10 +451,41 @@
     document.body.classList.toggle("sb", !!S.star);
   };
 
-  const apply = (s) => { if (!s || s.error) return; S = s; last = performance.now(); err = 0; tiles(); lists(); chips(); tip(); window.AO.S = s; window.AO.onState && window.AO.onState(s); };
+  let seen = null;
+  const nt = (s) => {
+    const ap = s.q.filter((j) => j.st === "approve");
+    const ids = new Set(ap.map((j) => j.id));
+    if (seen) {
+      let on = false;
+      try { on = localStorage.getItem("ao.nt") === "1"; } catch {}
+      if (on && "Notification" in window && Notification.permission === "granted" && !document.hasFocus()) {
+        for (const j of ap) if (!seen.has(j.id)) {
+          const n = new Notification("Pull request ready for review", { body: rn(j) + " · " + j.title, tag: "ao-" + j.id });
+          n.onclick = () => { window.focus(); window.AO.job && window.AO.job(j.id); n.close(); };
+        }
+      }
+    }
+    seen = ids;
+  };
+  const apply = (s) => { if (!s || s.error) return; nt(s); S = s; last = performance.now(); err = 0; tiles(); lists(); chips(); tip(); window.AO.S = s; window.AO.onState && window.AO.onState(s); };
   window.AO.apply = apply;
 
-  document.addEventListener("click", (e) => {
+  document.addEventListener("change", (e) => {
+    if (e.target.id === "bkA") { const aps = S.q.filter((j) => j.st === "approve").map((j) => j.id); sel.clear(); if (e.target.checked) aps.forEach((k) => sel.add(k)); lists(); return; }
+    if (e.target.classList.contains("bk")) { const k = Number(e.target.dataset.k); e.target.checked ? sel.add(k) : sel.delete(k); lists(); }
+  });
+  document.addEventListener("click", async (e) => {
+    if (e.target.id === "bkS" || e.target.id === "bkD") {
+      const b = e.target, dr = b.id === "bkD";
+      if (dr && b.dataset.sure !== "1") { b.dataset.sure = "1"; b.textContent = "click again to drop " + sel.size; return; }
+      b.disabled = true;
+      const ids = [...sel];
+      let r = null;
+      for (const id of ids) r = await post({ a: dr ? "drop" : "approve", id });
+      sel.clear();
+      apply(r);
+      return;
+    }
     const a = e.target.closest("[data-u]");
     if (a) { e.preventDefault(); open(a.dataset.u); return; }
     const d = e.target.closest("[data-d]");
@@ -454,6 +495,28 @@
     const jb = e.target.closest("[data-j]");
     if (jb) { e.preventDefault(); window.AO.job && window.AO.job(Number(jb.dataset.j)); }
   });
+  const SUN = `<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="8" r="3" fill="currentColor"/><g stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M3 3l1 1M12 12l1 1M3 13l1-1M12 4l1-1"/></g></svg>`;
+  const MOON = `<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M10.5 1.5a6.5 6.5 0 1 0 4 11.6A7 7 0 0 1 10.5 1.5z"/></svg>`;
+  const thb = () => { if (S) lists(); $("bTh").innerHTML = lt() ? MOON : SUN; $("bTh").title = lt() ? "Switch to dark" : "Switch to light"; };
+  thb();
+  new MutationObserver(thb).observe(document.documentElement, { attributes: true, attributeFilter: ["data-th"] });
+  $("bTh").onclick = () => window.TH.set(lt() ? "dark" : "light");
+  let H = null;
+  const HK = [["gh", "GitHub"], ["ai", "AI"], ["docker", "Docker"], ["hosts", "Machines"]];
+  const hlt = async (f) => {
+    try { H = await get("/api/health" + (f ? "?f=1" : "")); } catch { return; }
+    const el = $("cH"), bad = HK.filter(([k]) => H[k] && !H[k].ok);
+    el.hidden = false;
+    el.className = "chip hc" + (bad.length ? " bad" : "");
+    el.innerHTML = HK.map(([k, l]) => `<i class="${H[k]?.ok ? "" : "no"}" title="${l}"></i>`).join("") + (bad.length ? " " + bad.map(([, l]) => l).join(", ") : "");
+    el.title = bad.length ? "problems: " + bad.map(([, l]) => l).join(", ") : "everything ok";
+    window.AO.H = H;
+    return H;
+  };
+  window.AO.hlt = hlt;
+  $("cH").onclick = () => window.AO.health && window.AO.health();
+  hlt();
+  setInterval(() => hlt(), 300000);
   $("bPause").onclick = () => post({ a: "pause", on: !S.o.man }).then(apply);
   $("bStar").onclick = (e) => { e.target.disabled = true; post({ op: "star" }, "/api/star").then((r) => { e.target.disabled = false; if (r.error) { e.target.textContent = "Could not star, try again"; return; } apply(r); }); };
   $("bLater").onclick = () => post({ op: "later" }, "/api/star").then(apply);

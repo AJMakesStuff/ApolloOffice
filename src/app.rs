@@ -287,6 +287,7 @@ impl App {
         let n = now();
         let td = self.set()["tokday"].as_i64().unwrap_or(0);
         let used = if td > 0 { self.db.n("select coalesce(sum(tin+tout),0) from tok where day=?", pa![crate::db::day()]) } else { 0 };
+        let wh = off_hours(&self.set()["wh"]);
         let bd = self.set()["budday"].as_f64().unwrap_or(0.0);
         let bu = if bd > 0.0 { self.db.usd(None) } else { 0.0 };
         let mut l = self.lv.lock().unwrap();
@@ -302,6 +303,8 @@ impl App {
             "daily token limit reached, paused until midnight".into()
         } else if bd > 0.0 && bu >= bd {
             format!("daily budget of ${bd:.2} reached, paused until midnight")
+        } else if let Some(f) = wh {
+            format!("outside working hours, resumes at {f}")
         } else {
             String::new()
         };
@@ -331,6 +334,29 @@ impl App {
 }
 
 fn drop_<T>(_: T) {}
+
+pub fn off_hours(w: &Value) -> Option<String> {
+    if w["on"].as_bool() != Some(true) {
+        return None;
+    }
+    let m = |s: &str| -> Option<u32> {
+        let (h, mi) = s.split_once(':')?;
+        Some(h.parse::<u32>().ok()? * 60 + mi.parse::<u32>().ok()?)
+    };
+    let (f, t) = (m(w["from"].as_str()?)?, m(w["to"].as_str()?)?);
+    if f == t {
+        return None;
+    }
+    use chrono::Timelike;
+    let n = chrono::Local::now();
+    let x = n.hour() * 60 + n.minute();
+    let inside = if f < t { x >= f && x < t } else { x >= f || x < t };
+    if inside {
+        None
+    } else {
+        w["from"].as_str().map(String::from)
+    }
+}
 
 pub fn fast() -> bool {
     std::env::var("APOLLO_OFFICE_FAST").map(|v| v == "1").unwrap_or(false)

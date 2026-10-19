@@ -20,7 +20,72 @@
   A.usd = usd;
   const busy = (b, on, t) => { b.disabled = on; if (t) b.textContent = t; };
 
-  const diff = (d) => esc(d || "").split("\n").map((l) => `<span class="${l.startsWith("diff --git") ? "fh" : l.startsWith("@@") ? "hh" : l.startsWith("+") && !l.startsWith("+++") ? "ad" : l.startsWith("-") && !l.startsWith("---") ? "rm" : ""}">${l}</span>`).join("\n");
+
+  const tok = (s) => s.match(/\s+|\w+|[^\w\s]/g) || [];
+  const wd = (a, b) => {
+    const x = tok(a), y = tok(b), n = x.length, m = y.length;
+    if (n * m > 40000 || !n || !m) return [esc(a), esc(b)];
+    const L = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+    for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) L[i][j] = x[i] === y[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+    if (L[0][0] * 2 < Math.max(n, m)) return [esc(a), esc(b)];
+    let i = 0, j = 0, A = "", B = "";
+    while (i < n || j < m) {
+      if (i < n && j < m && x[i] === y[j]) { A += esc(x[i]); B += esc(y[j]); i++; j++; }
+      else if (j < m && (i >= n || L[i][j + 1] >= L[i + 1][j])) { B += `<mark>${esc(y[j])}</mark>`; j++; }
+      else { A += `<mark>${esc(x[i])}</mark>`; i++; }
+    }
+    return [A.replace(/<\/mark><mark>/g, ""), B.replace(/<\/mark><mark>/g, "")];
+  };
+  const pf = (d) => {
+    const fs = [];
+    let f = null, o = 0, n = 0, D = [], P = [];
+    const fl = () => {
+      const k = Math.min(D.length, P.length);
+      for (let i = 0; i < Math.max(D.length, P.length); i++) {
+        if (i < k) { const [a, b] = wd(D[i][1], P[i][1]); f.r.push({ t: "p", o: D[i][0], n: P[i][0], a, b }); }
+        else if (i < D.length) f.r.push({ t: "d", o: D[i][0], a: esc(D[i][1]) });
+        else f.r.push({ t: "a", n: P[i][0], b: esc(P[i][1]) });
+      }
+      D = []; P = [];
+    };
+    const ls = (d || "").split("\n");
+    if (ls.length && ls[ls.length - 1] === "") ls.pop();
+    for (const l of ls) {
+      if (l.startsWith("diff --git")) { if (f) fl(); f = { nm: l.replace(/^diff --git a\/(.*) b\/.*$/, "$1"), r: [], ad: 0, rm: 0 }; fs.push(f); continue; }
+      if (!f) { f = { nm: "", r: [], ad: 0, rm: 0 }; fs.push(f); }
+      if (l.startsWith("@@")) { fl(); const m = l.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)/); o = m ? +m[1] : 0; n = m ? +m[2] : 0; f.r.push({ t: "h", s: esc(l) }); continue; }
+      if (/^(index |--- |\+\+\+ |new file|deleted file|similarity|rename |old mode|new mode|Binary)/.test(l) && !f.r.length) { if (l.startsWith("+++ ") && !f.nm) f.nm = l.slice(6); continue; }
+      if (l.startsWith("-")) { D.push([o++, l.slice(1)]); f.rm++; continue; }
+      if (l.startsWith("+")) { P.push([n++, l.slice(1)]); f.ad++; continue; }
+      fl();
+      if (l.startsWith("\\")) continue;
+      if (!f.r.length && !l) continue;
+      f.r.push({ t: "c", o: o++, n: n++, s: esc(l.slice(1)) });
+    }
+    if (f) fl();
+    return fs.filter((x) => x.r.length || x.nm);
+  };
+  let dm = "u";
+  try { dm = localStorage.getItem("ao.dm") || "u"; } catch {}
+  let ldf = "";
+  const dview = (d) => {
+    ldf = d || "";
+    const fs = pf(d);
+    if (!fs.length) return `<div class="dv"><div class="empty">no diff</div></div>`;
+    const ln = (x) => `<td class="ln">${x ?? ""}</td>`;
+    const U = (r) => r.t === "h" ? `<tr class="hh"><td colspan="3">${r.s}</td></tr>` : r.t === "c" ? `<tr>${ln(r.o)}${ln(r.n)}<td class="cd"> ${r.s}</td></tr>` : (r.t === "p" || r.t === "d" ? `<tr class="rm">${ln(r.o)}${ln()}<td class="cd">-${r.a}</td></tr>` : "") + (r.t === "p" || r.t === "a" ? `<tr class="ad">${ln()}${ln(r.n)}<td class="cd">+${r.b}</td></tr>` : "");
+    const Sp = (r) => r.t === "h" ? `<tr class="hh"><td colspan="4">${r.s}</td></tr>` : r.t === "c" ? `<tr>${ln(r.o)}<td class="cd">${r.s}</td>${ln(r.n)}<td class="cd">${r.s}</td></tr>` : `<tr>${r.t === "a" ? `${ln()}<td class="cd e"></td>` : `${ln(r.o)}<td class="cd rm">${r.a}</td>`}${r.t === "d" ? `${ln()}<td class="cd e"></td>` : `${ln(r.n)}<td class="cd ad">${r.b}</td>`}</tr>`;
+    return `<div class="dv"><div class="dvh"><span>${fs.length} ${fs.length === 1 ? "file" : "files"} · <span class="ok2">+${fs.reduce((s, f) => s + f.ad, 0)}</span> <span class="bad2">−${fs.reduce((s, f) => s + f.rm, 0)}</span></span><span class="sp"></span><div class="tabs"><button type="button" data-dm="u" class="${dm === "u" ? "on" : ""}">unified</button><button type="button" data-dm="s" class="${dm === "s" ? "on" : ""}">split</button></div></div>
+      ${fs.map((f) => `<details open><summary><span class="fn">${esc(f.nm)}</span><span class="ok2">+${f.ad}</span> <span class="bad2">−${f.rm}</span></summary><div class="tw"><table class="dt${dm === "s" ? " sp2" : ""}">${f.r.map(dm === "s" ? Sp : U).join("")}</table></div></details>`).join("")}</div>`;
+  };
+  B.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-dm]");
+    if (!b) return;
+    dm = b.dataset.dm;
+    try { localStorage.setItem("ao.dm", dm); } catch {}
+    const v = B.querySelector(".dv");
+    if (v) v.outerHTML = dview(ldf);
+  });
 
   const repos = async () => {
     cfg = await get("/api/cfg");
@@ -212,8 +277,15 @@
       <div class="sec"><h4>Work</h4><div class="box"><div class="fm" style="margin:0">
         <label>Hunters</label><input type="number" name="hunters" min="0" max="12" value="${s.hunters}"><div class="hint">How many bug hunts may run at once (only in repos with hunting on).</div>
         <label>Daily token limit</label><input type="number" name="tokday" min="0" value="${s.tokday}"><div class="hint">0 = no limit. The office always pauses when a provider reports a usage limit.</div>
+        <label>Working hours</label><div class="acts" style="margin:0;align-items:center">${tg("whon", s.wh?.on, "only work from")}<input type="time" name="whf" value="${esc(s.wh?.from || "08:00")}" style="width:auto"> to <input type="time" name="wht" value="${esc(s.wh?.to || "22:00")}" style="width:auto"></div><div class="hint">Outside these hours the office pauses; running steps finish first. Times of this computer.</div>
+      </div></div></div>
+      <div class="sec"><h4>Appearance</h4><div class="box"><div class="fm" style="margin:0">
+        <label>Theme</label><select id="thm"><option value="dark">Dark</option><option value="light">Light</option><option value="system">Like the system</option></select>
+        <div class="hint">Saved in this browser.</div>
       </div></div></div>
       <div class="sec"><h4>Notifications</h4><div class="box"><div class="fm" style="margin:0">
+        <label>In this browser</label><label class="ck"><input type="checkbox" id="bnt"> show a desktop notification when a pull request waits for review</label>
+        <div class="hint" id="bnh">Only while this tab is open somewhere.</div>
         <label>ntfy topic URL</label><input type="text" name="ntfy" value="${esc(s.ntfy)}" placeholder="https://ntfy.sh/your-secret-topic">
         <label>Discord webhook</label><input type="text" name="discord" value="${esc(s.discord)}" placeholder="https://discord.com/api/webhooks/…">
       </div><div class="acts"><button type="button" id="bt">Send test</button></div></div></div>
@@ -232,12 +304,63 @@
         <div class="hint">GitHub Actions: a failed run can report itself with <code>Silvertree2010/ApolloOffice/report</code>, see the README.</div>
         <div class="acts"><button type="button" id="hn">${cfg.hook.on ? "Replace link" : "Create link"}</button>${cfg.hook.on ? `<button type="button" class="dng" id="ho">Revoke</button>` : ""}</div></div></div>
       <div class="sec"><h4>Updates</h4><div class="box">${tg("updates", s.updates, "install updates automatically when the office is idle")}<div class="msg" id="um">${ust}</div><div class="acts"><button type="button" id="uc">Check now</button>${u.ready && u.ready !== A.S?.v ? `<button type="button" class="pri" id="ua">Install and restart</button>` : ""}</div></div></div>
+      <div class="sec"><h4>Export and import</h4><div class="box"><div class="ck">Settings, repositories, machines and models as a JSON file. API keys, tokens, logins and notification addresses are not included.</div>
+        <div class="acts"><button type="button" id="ex">Export</button><button type="button" id="im">Import…</button><input type="file" id="imf" accept="application/json,.json" hidden></div><div class="msg" id="xm"></div></div></div>
       <div class="sec"><h4>This installation</h4><div class="box"><div class="fm" style="margin:0">
         <label>Start at login</label>${tg("auto", cfg.auto, "start ApolloOffice when I log in")}
         <label>Data folder</label><span class="mono" style="font-size:12px;word-break:break-all">${esc(cfg.data)}</span>
         <label>Version</label><span class="mono" style="font-size:12px">${esc(A.S?.v || "")} · ${esc(cfg.asset)}</span>
       </div></div></div>
-      <div class="acts"><button class="pri">Save</button></div><div class="msg" id="sm"></div></form>`;
+      <div class="acts"><button class="pri">Save</button></div><div class="msg" id="sm"></div></form>
+      <div class="sec dz"><h4>Danger zone</h4><div class="box">
+        <div class="dzr"><div><b>Sign out everywhere</b><div class="hint">Ends every session, including this one. You need a new link from <code>apollo-office login-link</code>.</div></div><button type="button" class="dng" data-dz="logout">Sign out everywhere</button></div>
+        <div class="dzr"><div><b>Clear job history</b><div class="hint">Deletes finished and dropped jobs and their log. Pull requests and costs stay.</div></div><button type="button" class="dng" data-dz="history">Clear history</button></div>
+        <div class="dzr"><div><b>Reset settings</b><div class="hint">Models, limits, budgets, notifications and paused workers go back to defaults. Keys, repositories and machines stay.</div></div><button type="button" class="dng" data-dz="reset">Reset settings</button></div>
+        <div class="dzr"><div><b>Delete all data</b><div class="hint">Deletes repositories, machines, jobs, pull request history, costs, settings and stored API keys. Nothing on GitHub changes. Type <code>delete</code> to confirm.</div><input type="text" id="dzw" placeholder="delete" autocomplete="off" style="margin-top:6px;max-width:160px"></div><button type="button" class="dng" data-dz="wipe">Delete everything</button></div>
+        <div class="msg" id="dzm"></div></div></div>`;
+    $("thm").value = window.TH.get();
+    $("thm").onchange = (e) => window.TH.set(e.target.value);
+    try { $("bnt").checked = localStorage.getItem("ao.nt") === "1" && "Notification" in window && Notification.permission === "granted"; } catch {}
+    if (!("Notification" in window)) { $("bnt").disabled = true; $("bnh").textContent = "This browser does not support notifications."; }
+    $("bnt").onchange = async (e) => {
+      let on = e.target.checked;
+      if (on && Notification.permission !== "granted") on = (await Notification.requestPermission()) === "granted";
+      e.target.checked = on;
+      if (!on && e.target.checked !== on) $("bnh").textContent = "The browser blocked notifications for this page.";
+      try { localStorage.setItem("ao.nt", on ? "1" : "0"); } catch {}
+    };
+    $("ex").onclick = async () => {
+      const d = await get("/api/export");
+      const u = URL.createObjectURL(new Blob([JSON.stringify(d, null, 2)], { type: "application/json" }));
+      const a = document.createElement("a");
+      a.href = u; a.download = "apollo-office-" + new Date().toISOString().slice(0, 10) + ".json";
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(u), 1000);
+      $("xm").className = "msg"; $("xm").textContent = "Exported.";
+    };
+    $("im").onclick = () => $("imf").click();
+    $("imf").onchange = async (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      let d;
+      try { d = JSON.parse(await f.text()); } catch { $("xm").className = "msg bad2"; $("xm").textContent = "This file is not valid JSON."; return; }
+      const r = await post(d, "/api/import");
+      if (r.error) { $("xm").className = "msg bad2"; $("xm").textContent = r.error; return; }
+      await settings();
+      $("xm").className = "msg"; $("xm").textContent = r.m;
+    };
+    for (const b of B.querySelectorAll("[data-dz]")) b.onclick = async () => {
+      const op = b.dataset.dz, m = $("dzm");
+      if (op === "wipe" && $("dzw").value.trim() !== "delete") { m.className = "msg bad2"; m.textContent = "Type delete into the field first."; return; }
+      if (b.dataset.sure !== "1") { b.dataset.sure = "1"; b.textContent = "Click again to confirm"; return; }
+      busy(b, true, "Working…");
+      const r = await post({ op, sure: op === "wipe" ? "delete" : undefined }, "/api/danger");
+      if (r.error) { busy(b, false, "Try again"); b.dataset.sure = ""; m.className = "msg bad2"; m.textContent = r.error; return; }
+      if (op === "logout") { location.reload(); return; }
+      if (op === "wipe") { hide(); location.reload(); return; }
+      await settings();
+      $("dzm").className = "msg"; $("dzm").textContent = op === "history" ? "Job history cleared." : "Settings reset.";
+    };
     const send = async (test) => {
       const f = $("fs"), v = fv(f);
       for (const e of f.querySelectorAll("[data-key]")) {
@@ -245,7 +368,7 @@
         const r = await post({ id: e.dataset.key, key: e.value.trim() }, "/api/prov");
         if (r.error) { $("sm").className = "msg bad2"; $("sm").textContent = r.error; return; }
       }
-      const r = await post({ hunters: v.hunters, tokday: v.tokday, ntfy: v.ntfy, discord: v.discord, auto: v.auto, updates: v.updates, ollama: v.ollama, octx: v.octx, cckc: v.cckc, test }, "/api/set");
+      const r = await post({ wh: { on: v.whon, from: v.whf, to: v.wht }, hunters: v.hunters, tokday: v.tokday, ntfy: v.ntfy, discord: v.discord, auto: v.auto, updates: v.updates, ollama: v.ollama, octx: v.octx, cckc: v.cckc, test }, "/api/set");
       if (r.error) { $("sm").className = "msg bad2"; $("sm").textContent = r.error; return; }
       await settings();
       $("sm").textContent = test ? "Saved and test sent." : "Saved.";
@@ -304,6 +427,18 @@
     };
   };
 
+  const health = async (f) => {
+    show("Health", "health");
+    if (!A.H || f) { B.innerHTML = `<div class="empty">checking…</div>`; await A.hlt(f); }
+    const H = A.H || {};
+    const row = (ok, k, m) => `<div class="ck" style="margin:4px 0;align-items:flex-start"><b class="${ok ? "ok2" : "bad2"}" style="min-width:56px">${ok ? "ok" : "problem"}</b><span><b>${esc(k)}</b> ${esc(m)}</span></div>`;
+    const sec = (t, x) => `<div class="sec"><h4>${t}</h4><div class="box">${x}</div></div>`;
+    const ls = (v) => (Array.isArray(v.m) ? v.m.map((y) => row(y.ok, y.k, y.m)).join("") : row(v.ok, "", v.m));
+    B.innerHTML = H.gh ? sec("GitHub", row(H.gh.ok, "", H.gh.m)) + sec("AI providers in use", ls(H.ai)) + sec("Docker", row(H.docker.ok, "", H.docker.m)) + sec("Machines", ls(H.hosts)) + `<div class="msg">Checked ${new Date(H.t).toLocaleTimeString()}. The office checks again every 5 minutes.</div><div class="acts"><button id="hr">Check now</button></div>` : `<div class="empty">Could not check.</div><div class="acts"><button id="hr">Check now</button></div>`;
+    $("hr").onclick = () => health(true);
+  };
+  A.health = health;
+
   const job = async (id) => {
     const j = await get("/api/job?id=" + id);
     if (j.error) return;
@@ -316,7 +451,7 @@
       B.innerHTML = `<div class="sec"><div class="box"><div class="hd2"><b>${esc(j.repo)}${j.num ? " #" + j.num : j.ext ? " (reported by " + esc(j.ext) + ")" : " (found by Hunter)"}</b>${j.url ? `<a class="a" href="#" data-u="${esc(j.url)}">${j.num ? "open issue" : "open repository"}</a>` : ""}</div><div class="msg">Built and tested on ${esc(j.h || "")}. Nothing is on GitHub yet.</div>${cs}</div></div>
       <div class="sec"><h4>Pull request</h4><input type="text" id="pt" value="${esc(j.pt || j.title)}"><textarea id="pb" style="min-height:220px;margin-top:8px">${esc(j.pb || "")}</textarea></div>
       ${j.proof ? `<div class="sec"><h4>Proof</h4><pre class="df">${esc((j.proof.a || "") + "\n\n" + (j.proof.b || ""))}</pre></div>` : ""}
-      <div class="sec"><h4>Diff</h4><pre class="df">${diff(j.df)}</pre></div>
+      <div class="sec"><h4>Diff</h4>${dview(j.df)}</div>
       <div class="acts"><button class="pri" id="ba">Submit pull request</button><button class="dng" id="bd">Drop</button></div><div class="msg" id="jm"></div>
       <div class="sec" style="margin-top:20px"><h4>Log</h4><div class="log">${ev}</div></div>`;
       $("ba").onclick = async () => {
@@ -333,7 +468,7 @@
     }
     B.innerHTML = `<div class="sec"><div class="box"><div class="hd2"><b>${esc(j.title)}</b><span class="pill">${esc(j.st)}</span></div><div class="msg">${esc(j.repo)} ${esc(tag)} · ${esc(j.kind)}${j.h ? " · " + esc(j.h) : ""}\n${esc(j.why || "")}</div>${cs}
       <div class="acts">${j.url ? `<button data-u="${esc(j.url)}">Open on GitHub</button>` : ""}${!["done", "drop"].includes(j.st) ? `<button class="dng" data-d="${id}">Drop</button>` : ""}${j.st === "drop" && j.kind === "fix" ? `<button data-rq="${id}">Try again</button>` : ""}</div></div></div>
-      ${j.df ? `<div class="sec"><h4>Diff</h4><pre class="df">${diff(j.df)}</pre></div>` : ""}
+      ${j.df ? `<div class="sec"><h4>Diff</h4>${dview(j.df)}</div>` : ""}
       <div class="sec"><h4>Log</h4><div class="log">${ev || `<div class="empty">nothing yet</div>`}</div></div>`;
   };
   A.job = job;

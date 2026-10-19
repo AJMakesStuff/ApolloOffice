@@ -21,7 +21,7 @@ fn rs(c: StatusCode, ct: &str, b: impl Into<Body>) -> Response<Body> {
         .header("x-content-type-options", "nosniff")
         .header("x-frame-options", "DENY")
         .header("referrer-policy", "same-origin")
-        .header("content-security-policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ws://127.0.0.1:* ws://localhost:* ws://[::1]:*; frame-ancestors 'none'; form-action 'self'; base-uri 'none'")
+        .header("content-security-policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ws://127.0.0.1:* ws://localhost:*; frame-ancestors 'none'; form-action 'self'; base-uri 'none'")
         .body(b.into())
         .unwrap()
 }
@@ -168,6 +168,210 @@ pub fn hints(rows: &[Value]) -> Vec<String> {
         }
     }
     o
+}
+
+fn sets(a: &Ax, b: &Value) {
+    let mut s = a.db.kg("set");
+    if !s.is_object() {
+        s = json!({});
+    }
+    if let Some(m) = b["md"].as_object() {
+        for (k, v) in m {
+            if let Some(x) = v.as_str() {
+                if regex::Regex::new(r"^[A-Za-z0-9._:/\[\]-]{0,120}$").unwrap().is_match(x.trim()) {
+                    s["md"][k] = json!(x.trim());
+                }
+            }
+        }
+    }
+    if let Some(x) = b["big"].as_bool() {
+        s["big"] = json!(x);
+    }
+    if let Some(x) = b["hunters"].as_i64() {
+        s["hunters"] = json!(x.clamp(0, 12));
+    }
+    if let Some(x) = b["updates"].as_bool() {
+        s["updates"] = json!(x);
+    }
+    if let Some(x) = b["cckc"].as_str() {
+        if regex::Regex::new(r"^[A-Za-z0-9._ -]{0,100}$").unwrap().is_match(x.trim()) {
+            s["prov"]["cc"]["kc"] = json!(x.trim());
+        }
+    }
+    if let Some(x) = b["octx"].as_i64() {
+        s["prov"]["ollama"]["ctx"] = json!(x.clamp(2048, 1_048_576));
+    }
+    if let Some(x) = b["ollama"].as_str() {
+        let x = x.trim();
+        if x.is_empty() || x.starts_with("http://") || x.starts_with("https://") {
+            s["prov"]["ollama"]["base"] = json!(x);
+        }
+    }
+    if let Some(x) = b["tokday"].as_i64() {
+        s["tokday"] = json!(x.max(0));
+    }
+    if let Some(x) = b["budday"].as_f64() {
+        s["budday"] = json!(x.clamp(0.0, 100_000.0));
+    }
+    if let Some(o) = b["px"].as_object() {
+        let mut px = json!({});
+        for (k, v) in o.iter().take(100) {
+            let k = k.trim().to_lowercase();
+            let x: Vec<f64> = v.as_array().map(|v| v.iter().filter_map(|x| x.as_f64()).filter(|x| x.is_finite() && *x >= 0.0 && *x < 10_000.0).collect()).unwrap_or_default();
+            if regex::Regex::new(r"^[a-z0-9._:/-]{1,100}$").unwrap().is_match(&k) && (x.len() == 2 || x.len() == 4) {
+                px[k] = json!(x);
+            }
+        }
+        s["px"] = px;
+    }
+    for k in ["ntfy", "discord"] {
+        if let Some(x) = b[k].as_str() {
+            let x = x.trim();
+            if x.is_empty() || x.starts_with("https://") || k == "ntfy" && x.starts_with("http://") {
+                s[k] = json!(x);
+            }
+        }
+    }
+    a.db.ks("set", &s);
+    a.tick();
+    if let Some(w) = b["wh"].as_object() {
+        let re = regex::Regex::new(r"^([01]\d|2[0-3]):[0-5]\d$").unwrap();
+        let (f, t) = (w.get("from").and_then(|x| x.as_str()).unwrap_or(""), w.get("to").and_then(|x| x.as_str()).unwrap_or(""));
+        if re.is_match(f) && re.is_match(t) {
+            let mut s = a.db.kg("set");
+            s["wh"] = json!({"on": w.get("on").and_then(|x| x.as_bool()).unwrap_or(false), "from": f, "to": t});
+            a.db.ks("set", &s);
+            a.tick();
+        }
+    }
+}
+
+const RPF: &[&str] = &["iss", "hunt", "nm", "on_", "maxo", "maxd", "bud", "ci", "setup", "rules", "mode"];
+const HSF: &[&str] = &["id", "ssh", "dk", "ln", "ci", "gb", "raw", "no", "cpu"];
+
+fn export(a: &Ax) -> Value {
+    let mut s = a.db.kg("set");
+    if let Some(o) = s.as_object_mut() {
+        o.remove("ntfy");
+        o.remove("discord");
+    }
+    let pick = |r: &Value, ks: &[&str]| Value::Object(ks.iter().map(|k| (k.to_string(), r[*k].clone())).collect());
+    json!({
+        "apollo_office": crate::app::V,
+        "t": now(),
+        "set": s,
+        "repos": a.db.all("select * from rp order by full", pa![]).iter().map(|r| { let mut x = pick(r, RPF); x["full"] = r["full"].clone(); x }).collect::<Vec<_>>(),
+        "hosts": a.db.all("select * from hs order by id", pa![]).iter().map(|r| pick(r, HSF)).collect::<Vec<_>>(),
+    })
+}
+
+fn import(a: &Ax, b: &Value) -> Result<String, String> {
+    if !b["apollo_office"].is_string() {
+        return Err("this is not an ApolloOffice export".into());
+    }
+    let s = &b["set"];
+    let mut x = json!({});
+    for k in ["md", "hunters", "tokday", "budday", "updates", "px", "wh"] {
+        if !s[k].is_null() {
+            x[k] = s[k].clone();
+        }
+    }
+    if let Some(v) = s["prov"]["ollama"]["base"].as_str() {
+        x["ollama"] = json!(v);
+    }
+    if let Some(v) = s["prov"]["ollama"]["ctx"].as_i64() {
+        x["octx"] = json!(v);
+    }
+    if let Some(v) = s["prov"]["cc"]["kc"].as_str() {
+        x["cckc"] = json!(v);
+    }
+    sets(a, &x);
+    let mut nr = 0;
+    for r in b["repos"].as_array().cloned().unwrap_or_default().iter().take(500) {
+        let Some(f) = rid(r["full"].as_str().unwrap_or("")) else { continue };
+        if a.db.n("select count(*) from rp where full=?", pa![f.clone()]) > 0 {
+            continue;
+        }
+        a.db.run("insert into rp(full,t0) values(?,?)", pa![f.clone(), now()]);
+        for k in RPF {
+            let v = &r[*k];
+            match v {
+                Value::Number(n) if n.is_i64() && *k != "bud" => {
+                    a.db.run(&format!("update rp set {k}=? where full=?"), pa![n.as_i64().unwrap().clamp(0, 10000), f.clone()]);
+                }
+                Value::Number(n) => {
+                    a.db.run(&format!("update rp set {k}=? where full=?"), pa![n.as_f64().unwrap_or(0.0).clamp(0.0, 100_000.0), f.clone()]);
+                }
+                Value::String(t) if ["ci", "setup", "rules", "mode"].contains(k) => {
+                    let t = if *k == "mode" && t != "auto" { "ask".to_string() } else { crate::sh::head(t.trim(), 4000) };
+                    a.db.run(&format!("update rp set {k}=? where full=?"), pa![t, f.clone()]);
+                }
+                _ => {}
+            }
+        }
+        nr += 1;
+    }
+    let mut nh = 0;
+    let idr = regex::Regex::new(r"^[A-Za-z0-9._-]{1,40}$").unwrap();
+    let shr = regex::Regex::new(r"^[A-Za-z0-9._@-]{0,100}$").unwrap();
+    for h in b["hosts"].as_array().cloned().unwrap_or_default().iter().take(50) {
+        let id = h["id"].as_str().unwrap_or("");
+        let ssh = if id == "local" { "" } else { h["ssh"].as_str().unwrap_or("") };
+        if !idr.is_match(id) || !shr.is_match(ssh) || a.db.n("select count(*) from hs where id=?", pa![id.to_string()]) > 0 {
+            continue;
+        }
+        let i = |k: &str, d: i64, lo: i64, hi: i64| h[k].as_i64().unwrap_or(d).clamp(lo, hi);
+        a.db.run("insert into hs(id,ssh,dk,ln,ci,gb,raw,on_,t0,no,cpu) values(?,?,?,?,?,?,?,0,?,?,?)", pa![id.to_string(), ssh.to_string(), i("dk", 0, 0, 1), i("ln", 1, 1, 8), i("ci", 1, 1, 8), i("gb", 50, 5, 10000), i("raw", 0, 0, 1), now(), crate::sh::head(h["no"].as_str().unwrap_or(""), 2000), i("cpu", 0, 0, 256)]);
+        nh += 1;
+    }
+    a.sw.notify_one();
+    Ok(format!("Imported settings, {nr} new repositories and {nh} new machines. Machines come in switched off: check them under Machines, then switch them on."))
+}
+
+async fn health(a: &Ax, f: bool) -> Value {
+    if let Some(v) = crate::gh::cg(a, "health", 300_000).filter(|_| !f) {
+        return v;
+    }
+    let ck = checks(a).await;
+    let s = a.set();
+    let mut us: Vec<&str> = vec![];
+    if let Some(m) = s["md"].as_object() {
+        for v in m.values() {
+            let p = crate::prov::parse(v.as_str().unwrap_or("")).0;
+            if !us.contains(&p) {
+                us.push(p);
+            }
+        }
+    }
+    let ps = crate::prov::status(a);
+    let mut ai = vec![];
+    for p in &us {
+        let st = ps.as_array().and_then(|x| x.iter().find(|y| y["id"] == *p)).cloned().unwrap_or(json!({}));
+        let nm = st["nm"].as_str().unwrap_or(p).to_string();
+        let (ok, m) = match *p {
+            "cc" => (ck["claude"]["ok"].as_bool().unwrap_or(false), if ck["claude"]["ok"] == true { "Claude Code found".to_string() } else { "Claude Code is not installed or not on PATH. Install it and log in with claude.".to_string() }),
+            "codex" => {
+                let r = crate::sh::run(&crate::sh::tool("codex"), &["--version".to_string()], crate::sh::Rq { t: 20, ..Default::default() }).await;
+                (r.c == 0, if r.c == 0 { "Codex CLI found".to_string() } else { "Codex CLI is not installed. Install it and log in with codex login.".to_string() })
+            }
+            "ollama" => (true, "local, checked when used".to_string()),
+            _ => (st["has"] == true, if st["has"] == true { "API key saved".to_string() } else { format!("No API key for {nm}. Add it under Settings → Providers.") }),
+        };
+        ai.push(json!({"k": nm, "ok": ok, "m": m}));
+    }
+    let net = a.lv.lock().unwrap().o.net.clone();
+    let hs = a.db.all("select id, dk from hs where on_=1", pa![]);
+    let ms: Vec<Value> = hs.iter().map(|h| { let id = h["id"].as_str().unwrap_or(""); let ok = *net.get(id).unwrap_or(&true); json!({"k": id, "ok": ok, "m": if ok { "reachable".to_string() } else if id == "local" { "this computer reports a problem, see the log".to_string() } else { format!("{id} is not reachable over ssh. Check that it is on and that ssh {id} works.") }}) }).collect();
+    let dk = hs.iter().any(|h| h["dk"] == 1 && h["id"] == "local");
+    let v = json!({
+        "gh": {"ok": ck["gh"]["ok"], "m": ck["gh"]["m"]},
+        "ai": {"ok": ai.iter().all(|x| x["ok"] == true), "m": ai},
+        "docker": {"ok": !dk || ck["docker"]["ok"] == true, "m": if dk { ck["docker"]["m"].clone() } else { json!("not used on this computer") }},
+        "hosts": {"ok": !ms.is_empty() && ms.iter().all(|x| x["ok"] == true), "m": if ms.is_empty() { json!([{"k": "none", "ok": false, "m": "No machine is switched on. Add one under Machines."}]) } else { json!(ms) }},
+        "t": now(),
+    });
+    crate::gh::cs(a, "health", &v);
+    v
 }
 
 fn th(t: &str) -> String {
@@ -578,69 +782,7 @@ async fn api(a: &Ax, m: &Method, p: &str, q: &str, b: Value) -> Response<Body> {
             }
         }
         ("POST", "/api/set") => {
-            let mut s = a.db.kg("set");
-            if !s.is_object() {
-                s = json!({});
-            }
-            if let Some(m) = b["md"].as_object() {
-                for (k, v) in m {
-                    if let Some(x) = v.as_str() {
-                        if regex::Regex::new(r"^[A-Za-z0-9._:/\[\]-]{0,120}$").unwrap().is_match(x.trim()) {
-                            s["md"][k] = json!(x.trim());
-                        }
-                    }
-                }
-            }
-            if let Some(x) = b["big"].as_bool() {
-                s["big"] = json!(x);
-            }
-            if let Some(x) = b["hunters"].as_i64() {
-                s["hunters"] = json!(x.clamp(0, 12));
-            }
-            if let Some(x) = b["updates"].as_bool() {
-                s["updates"] = json!(x);
-            }
-            if let Some(x) = b["cckc"].as_str() {
-                if regex::Regex::new(r"^[A-Za-z0-9._ -]{0,100}$").unwrap().is_match(x.trim()) {
-                    s["prov"]["cc"]["kc"] = json!(x.trim());
-                }
-            }
-            if let Some(x) = b["octx"].as_i64() {
-                s["prov"]["ollama"]["ctx"] = json!(x.clamp(2048, 1_048_576));
-            }
-            if let Some(x) = b["ollama"].as_str() {
-                let x = x.trim();
-                if x.is_empty() || x.starts_with("http://") || x.starts_with("https://") {
-                    s["prov"]["ollama"]["base"] = json!(x);
-                }
-            }
-            if let Some(x) = b["tokday"].as_i64() {
-                s["tokday"] = json!(x.max(0));
-            }
-            if let Some(x) = b["budday"].as_f64() {
-                s["budday"] = json!(x.clamp(0.0, 100_000.0));
-            }
-            if let Some(o) = b["px"].as_object() {
-                let mut px = json!({});
-                for (k, v) in o.iter().take(100) {
-                    let k = k.trim().to_lowercase();
-                    let x: Vec<f64> = v.as_array().map(|v| v.iter().filter_map(|x| x.as_f64()).filter(|x| x.is_finite() && *x >= 0.0 && *x < 10_000.0).collect()).unwrap_or_default();
-                    if regex::Regex::new(r"^[a-z0-9._:/-]{1,100}$").unwrap().is_match(&k) && (x.len() == 2 || x.len() == 4) {
-                        px[k] = json!(x);
-                    }
-                }
-                s["px"] = px;
-            }
-            for k in ["ntfy", "discord"] {
-                if let Some(x) = b[k].as_str() {
-                    let x = x.trim();
-                    if x.is_empty() || x.starts_with("https://") || k == "ntfy" && x.starts_with("http://") {
-                        s[k] = json!(x);
-                    }
-                }
-            }
-            a.db.ks("set", &s);
-            a.tick();
+            sets(a, &b);
             if b["test"].as_bool().unwrap_or(false) {
                 crate::ntf::send(a, "ApolloOffice", "Test notification", 3).await;
             }
@@ -674,6 +816,55 @@ async fn api(a: &Ax, m: &Method, p: &str, q: &str, b: Value) -> Response<Body> {
             }
         }
         ("GET", "/api/cost") => js(costs(a)),
+        ("GET", "/api/health") => js(health(a, qv("f") == "1").await),
+        ("GET", "/api/export") => js(export(a)),
+        ("POST", "/api/import") => match import(a, &b) {
+            Ok(m) => js(json!({"ok": true, "m": m, "cfg": cfg(a)})),
+            Err(e) => er(StatusCode::BAD_REQUEST, &e),
+        },
+        ("POST", "/api/danger") => {
+            let op = b["op"].as_str().unwrap_or("");
+            match op {
+                "logout" => {
+                    a.db.run("delete from ses", pa![]);
+                    a.say("scout", "signed out everywhere", None);
+                }
+                "history" => {
+                    a.db.run("delete from jobs where st in ('done','drop')", pa![]);
+                    a.db.run("delete from ev where j is null or j not in (select id from jobs)", pa![]);
+                    a.say("scout", "job history cleared", None);
+                }
+                "reset" => {
+                    for k in ["set", "hold", "man"] {
+                        a.db.kd(k);
+                    }
+                    {
+                        let mut l = a.lv.lock().unwrap();
+                        l.o.man = false;
+                        for w in l.w.values_mut() {
+                            w.hold = false;
+                        }
+                    }
+                    a.tick();
+                    a.say("scout", "settings reset to defaults", None);
+                }
+                "wipe" => {
+                    if b["sure"].as_str() != Some("delete") {
+                        return er(StatusCode::BAD_REQUEST, "type delete to confirm");
+                    }
+                    a.lv.lock().unwrap().o.man = true;
+                    for t in ["jobs", "ev", "prs", "cost", "tok", "seen", "cm", "rp", "hs", "lnk"] {
+                        a.db.run(&format!("delete from {t}"), pa![]);
+                    }
+                    a.db.run("delete from kv", pa![]);
+                    a.db.ks("man", &json!(true));
+                    *a.vk.lock().unwrap() = None;
+                    a.say("scout", "all data deleted, the office is paused", None);
+                }
+                _ => return er(StatusCode::BAD_REQUEST, "unknown op"),
+            }
+            js(json!({"ok": true}))
+        }
         ("POST", "/api/hooktok") => match b["op"].as_str().unwrap_or("") {
             "new" => {
                 let t = hex::encode(rand::random::<[u8; 24]>());
