@@ -10,6 +10,7 @@
   <a href="https://github.com/Silvertree2010/ApolloOffice/releases/latest"><img src="https://img.shields.io/github/v/release/Silvertree2010/ApolloOffice" alt="Latest release"></a>
   <a href="https://github.com/Silvertree2010/ApolloOffice/releases"><img src="https://img.shields.io/github/downloads/Silvertree2010/ApolloOffice/total" alt="Downloads"></a>
   <img src="https://img.shields.io/badge/Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-supported-2b2b2b" alt="Windows, macOS and Linux">
+  <img src="https://img.shields.io/badge/status-beta-cc785c" alt="Status: beta">
   <img src="https://img.shields.io/badge/Rust-single%20binary-B7410E?logo=rust&amp;logoColor=white" alt="Rust, single binary">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue" alt="License: AGPL-3.0"></a>
 </p>
@@ -23,6 +24,10 @@ bugs itself), reproduces them, writes a fix with a regression test, proves the
 test fails without the fix and passes with it, runs the project's tests,
 reviews the change and opens a pull request. Nothing goes through a server of
 ours.
+
+> [!WARNING]
+> ApolloOffice is in beta. Expect bugs, and please
+> [report them](https://github.com/Silvertree2010/ApolloOffice/issues).
 
 > [!NOTE]
 > Every pull request waits for your approval by default, with the diff, the
