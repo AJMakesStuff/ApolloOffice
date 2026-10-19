@@ -165,7 +165,7 @@ async fn vet1(a: &Ax, id: i64) -> R<()> {
     a.st("vet", "work", Some(id), "");
     if j.own() {
         if j.ext() {
-            let g = guard(a, vec![("r".into(), format!("{}\n\n{}", j.s("title"), crate::sh::head(&j.s("body"), 30000)))], "vet", Some(id)).await?;
+            let g = guard(a, vec![("r".into(), format!("from: {}\n{}\n\n{}", j.d["ext"]["src"].as_str().unwrap_or(""), j.s("title"), j.s("body")))], "vet", Some(id)).await?;
             if g["r"]["inj"].as_bool().unwrap_or(false) {
                 a.db.jset(id, &[("st", json!("drop")), ("why", json!(format!("Guard: {}", g["r"]["why"].as_str().unwrap_or(""))))]);
                 a.say("guard", &format!("{} blocked: {}", j.tag(), g["r"]["why"].as_str().unwrap_or("")), Some(id));

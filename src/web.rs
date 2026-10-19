@@ -165,7 +165,7 @@ fn rep(a: &Ax, b: &Value) -> Result<Value, (StatusCode, String)> {
     if a.db.n("select count(*) from jobs where json_extract(d,'$.api')=1 and st not in ('done','drop')", pa![]) >= 20 {
         return Err((StatusCode::TOO_MANY_REQUESTS, "20 reports are already open, try again later".into()));
     }
-    let src: String = b["src"].as_str().unwrap_or("").trim().chars().take(60).collect();
+    let src: String = b["src"].as_str().unwrap_or("").chars().filter(|c| c.is_ascii_alphanumeric() || " ._-".contains(*c)).take(40).collect::<String>().trim().to_string();
     if let Some(n) = b["issue"].as_i64() {
         if n <= 0 {
             return bad("issue must be a positive number");

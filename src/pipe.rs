@@ -573,7 +573,7 @@ pub fn body(j: &Job, f: &Value, ci: &str, ft: &str) -> String {
         if j.hunt() {
             v.push(format!("Found while testing `{}` (no existing issue): {}.", j.d["hunt"]["where"].as_str().unwrap_or(""), j.d["hunt"]["title"].as_str().unwrap_or("")));
         } else if j.ext() {
-            v.push(format!("Reported to us directly (no existing issue): {}.", j.s("title")));
+            v.push("Reported to us directly (no existing issue).".to_string());
         } else {
             v.push(format!("Fixes #{}", j.num));
         }
