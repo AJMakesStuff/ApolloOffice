@@ -276,7 +276,10 @@ pub fn ho(a: &App, id: &str) -> Option<Ho> {
 }
 
 pub const CT: &str = "apollo-office";
-pub const IM: &str = "apollo-office-build";
+pub fn im() -> String {
+    use sha2::{Digest, Sha256};
+    format!("apollo-office-build:{}", &hex::encode(Sha256::digest(DF.as_bytes()))[..10])
+}
 
 pub fn bp(p: &Path) -> String {
     let s = p.display().to_string();
@@ -379,20 +382,21 @@ pub async fn hx(a: &App, id: &str, s: &str, t: u64) -> Out {
 
 pub const DF: &str = r#"FROM rust:1-bookworm
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    pkg-config libssl-dev clang cmake git curl ca-certificates procps xz-utils unzip \
+    pkg-config libssl-dev clang cmake git curl ca-certificates procps xz-utils unzip libxdo-dev mesa-vulkan-drivers \
     python3 python3-pip python3-venv python3-dev nodejs npm golang-go \
     libasound2-dev libfontconfig1-dev libfreetype-dev libgl1-mesa-dev libgtk-3-dev libwayland-dev \
     libx11-dev libxcursor-dev libxi-dev libxkbcommon-dev libxrandr-dev libudev-dev xvfb \
     && rm -rf /var/lib/apt/lists/*
-RUN rustup component add rustfmt clippy && npm install -g pnpm yarn && pip3 install --break-system-packages pytest
+RUN rustup component add rustfmt clippy && rustup target add wasm32-unknown-unknown && npm install -g pnpm yarn && pip3 install --break-system-packages pytest
 ENV CARGO_TERM_COLOR=never CARGO_INCREMENTAL=0 PIP_BREAK_SYSTEM_PACKAGES=1
 WORKDIR /work
 "#;
 
 pub fn dkup(h: &Ho, cpu: i64) -> String {
     format!(
-        "command -v docker >/dev/null || {{ echo 'docker is not installed'; exit 2; }}\ndocker info >/dev/null 2>&1 || {{ echo 'docker is not running'; exit 2; }}\nif ! docker image inspect {IM} >/dev/null 2>&1; then docker build -q -t {IM} - <<'DOCKERFILE'\n{DF}DOCKERFILE\nfi\nr=$(docker inspect -f '{{{{.State.Running}}}}' {CT} 2>/dev/null)\nif [ -z \"$r\" ]; then docker run -d --name {CT} --restart unless-stopped --cpus {cpu} -v apollo-office-work:/work -v apollo-office-cargo:/usr/local/cargo/registry {IM} sleep infinity >/dev/null 2>&1 || [ \"$(docker inspect -f '{{{{.State.Running}}}}' {CT} 2>/dev/null)\" = true ] || docker start {CT} >/dev/null || exit 3; elif [ \"$r\" != true ]; then docker start {CT} >/dev/null || exit 3; fi\ndocker update --cpus {cpu} {CT} >/dev/null 2>&1\necho ok {}\n",
-        h.id
+        "command -v docker >/dev/null || {{ echo 'docker is not installed'; exit 2; }}\ndocker info >/dev/null 2>&1 || {{ echo 'docker is not running'; exit 2; }}\nif ! docker image inspect {im} >/dev/null 2>&1; then docker build -q -t {im} - <<'DOCKERFILE'\n{DF}DOCKERFILE\nfi\nold=$(docker inspect -f '{{{{.Config.Image}}}}' {CT} 2>/dev/null)\nif [ -n \"$old\" ] && [ \"$old\" != {im} ]; then docker rm -f {CT} >/dev/null 2>&1; fi\nr=$(docker inspect -f '{{{{.State.Running}}}}' {CT} 2>/dev/null)\nif [ -z \"$r\" ]; then docker run -d --name {CT} --restart unless-stopped --cpus {cpu} -v apollo-office-work:/work -v apollo-office-cargo:/usr/local/cargo/registry {im} sleep infinity >/dev/null 2>&1 || [ \"$(docker inspect -f '{{{{.State.Running}}}}' {CT} 2>/dev/null)\" = true ] || docker start {CT} >/dev/null || exit 3; elif [ \"$r\" != true ]; then docker start {CT} >/dev/null || exit 3; fi\ndocker update --cpus {cpu} {CT} >/dev/null 2>&1\ndocker images apollo-office-build --format '{{{{.Repository}}}}:{{{{.Tag}}}}' | grep -vx {im} | xargs -r docker rmi >/dev/null 2>&1\necho ok {}\n",
+        h.id,
+        im = im()
     )
 }
 

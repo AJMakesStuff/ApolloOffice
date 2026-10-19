@@ -1531,20 +1531,31 @@ async fn lane(a: Ax, h: String, k: i64) {
     a.lanes.lock().unwrap().remove(&key);
 }
 
+static ENS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<String>>> = std::sync::LazyLock::new(Default::default);
+static ING: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<String>>> = std::sync::LazyLock::new(Default::default);
+
 pub async fn lanes(a: Ax) {
     loop {
         for x in hosts(&a) {
             if !x.on {
                 continue;
             }
-            if x.dk && !a.db.kg(&format!("up:{}", x.id)).as_bool().unwrap_or(false) {
-                match crate::sh::ensure(&a, &x.id).await {
-                    Ok(()) => a.db.ks(&format!("up:{}", x.id), &json!(true)),
-                    Err(m) => {
-                        a.say("ci", &format!("[{}] machine not ready: {m}", x.id), None);
-                        continue;
-                    }
+            if x.dk && !ENS.lock().unwrap().contains(&x.id) {
+                if ING.lock().unwrap().insert(x.id.clone()) {
+                    let (a2, id) = (a.clone(), x.id.clone());
+                    tokio::spawn(async move {
+                        a2.say("ci", &format!("[{id}] preparing the build container"), None);
+                        match crate::sh::ensure(&a2, &id).await {
+                            Ok(()) => {
+                                a2.db.ks(&format!("up:{id}"), &json!(true));
+                                ENS.lock().unwrap().insert(id.clone());
+                            }
+                            Err(m) => a2.say("ci", &format!("[{id}] machine not ready: {m}"), None),
+                        }
+                        ING.lock().unwrap().remove(&id);
+                    });
                 }
+                continue;
             }
             for k in 1..=x.ln {
                 let key = format!("{}#{k}", x.id);
