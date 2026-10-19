@@ -1,6 +1,6 @@
 [package]
 name = "apollo-office"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 license = "AGPL-3.0-only"
 description = "An office of small Claude workers that turns GitHub issues into verified pull requests"
