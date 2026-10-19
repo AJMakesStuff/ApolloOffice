@@ -6,10 +6,15 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/Silvertree2010/ApolloOffice/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Silvertree2010/ApolloOffice/ci.yml?branch=main&amp;label=CI" alt="CI"></a>
+  <a href="https://github.com/Silvertree2010/ApolloOffice/releases/latest"><img src="https://img.shields.io/github/v/release/Silvertree2010/ApolloOffice" alt="Latest release"></a>
+  <a href="https://github.com/Silvertree2010/ApolloOffice/releases"><img src="https://img.shields.io/github/downloads/Silvertree2010/ApolloOffice/total" alt="Downloads"></a>
   <img src="https://img.shields.io/badge/Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-supported-2b2b2b" alt="Windows, macOS and Linux">
   <img src="https://img.shields.io/badge/Rust-single%20binary-B7410E?logo=rust&amp;logoColor=white" alt="Rust, single binary">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue" alt="License: AGPL-3.0"></a>
 </p>
+
+<p align="center"><a href="https://office.apollonet.dev">Website</a></p>
 
 ![The office: a pixel floor with one desk per worker, the queue, pull requests and the log on the right](docs/images/office.png)
 

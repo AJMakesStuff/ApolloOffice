@@ -22,7 +22,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 #[derive(Parser)]
-#[command(name = "apollo-office", version, about = "An office of small Claude workers that turns GitHub issues into verified pull requests")]
+#[command(name = "apollo-office", version, about = "AI workers that turn GitHub issues into verified bug-fix pull requests")]
 struct A {
     #[arg(long, default_value_t = 47300)]
     port: u16,

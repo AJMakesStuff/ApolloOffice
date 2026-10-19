@@ -3,7 +3,10 @@ name = "apollo-office"
 version = "0.5.1"
 edition = "2021"
 license = "AGPL-3.0-only"
-description = "An office of small Claude workers that turns GitHub issues into verified pull requests"
+description = "AI workers that turn GitHub issues into verified bug-fix pull requests, running on your own computer"
+homepage = "https://office.apollonet.dev"
+keywords = ["ai", "github", "bug-fixing", "pull-requests", "agents"]
+categories = ["development-tools", "command-line-utilities"]
 repository = "https://github.com/Silvertree2010/ApolloOffice"
 
 [dependencies]
