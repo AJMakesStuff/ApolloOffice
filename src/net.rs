@@ -1,23 +1,30 @@
 use crate::app::{sl, Ax, X, R};
 use crate::db::now;
-use crate::sh::{gh, hosts, hx};
+use crate::sh::{gh, ho, hosts, hraw};
 use std::sync::atomic::{AtomicI64, Ordering};
 
 static LAST: AtomicI64 = AtomicI64::new(0);
+static FAIL: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, u32>>> = std::sync::LazyLock::new(Default::default);
 
 async fn ck(a: &Ax, k: &str) -> bool {
     match k {
         "gh" => gh(&["api", "rate_limit", "--jq", ".rate.remaining"], 30).await.is_ok(),
         "an" => a.hc.get("https://api.anthropic.com/").timeout(std::time::Duration::from_secs(15)).send().await.is_ok(),
-        h => hx(a, h, "true", 30).await.c == 0,
+        h => match ho(a, h) {
+            Some(x) => hraw(&x, if x.dk { "docker inspect -f '{{.State.Running}}' apollo-office | grep -q true" } else { "true" }, 45).await.c == 0,
+            None => false,
+        },
     }
 }
 
 pub async fn probe(a: &Ax, ks: &[String]) {
     let v = futures::future::join_all(ks.iter().map(|k| ck(a, k))).await;
     let mut l = a.lv.lock().unwrap();
+    let mut f = FAIL.lock().unwrap();
     for (k, ok) in ks.iter().zip(v) {
-        l.o.net.insert(k.clone(), ok);
+        let n = if ok { 0 } else { f.get(k).copied().unwrap_or(0) + 1 };
+        f.insert(k.clone(), n);
+        l.o.net.insert(k.clone(), n < 2);
     }
     l.o.off = !*l.o.net.get("gh").unwrap_or(&true) || !*l.o.net.get("an").unwrap_or(&true);
     LAST.store(now(), Ordering::Relaxed);
