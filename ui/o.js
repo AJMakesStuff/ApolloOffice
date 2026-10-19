@@ -13,7 +13,8 @@
     return r.json();
   };
   window.AO = { get, post, esc, $ };
-  const open = (u) => { if (u) window.open(u, "_blank", "noopener"); };
+  const open = (u) => { if (/^https:\/\//.test(u || "")) window.open(u, "_blank", "noopener"); };
+  window.AO.open = open;
 
   const SK = {
     scout: { body: "#3fb6a8", dark: "#2b847a", light: "#7ad1c6" },
@@ -162,7 +163,8 @@
   const HAT = (r, t) => { K.draw(fc, ["..1..", ".121.", "11211"], r.cx - 2, r.top - 4, { c1: ["#4fb3e0", "#d0649f", "#5cbf6a"][Math.floor(t * 4) % 3], c2: "#e8e6df" }); };
 
   const crab = (n, x, y, t, o = {}) => {
-    const w = o.st ? { st: o.st, t: 0 } : S?.w?.[n] || { st: "idle" };
+    const bw = S?.w?.[n] || { st: "idle" };
+    const w = o.st ? { st: o.st, t: 0, hold: o.st !== "work" && bw.hold } : bw;
     const now = S ? S.t + (performance.now() - last) : Date.now();
     const off = S?.o?.off;
     const mood = now - (w.t || 0) < 6000 ? w.mood : "";
@@ -222,7 +224,8 @@
     if (lb) K.text(c, lb, x - (K.textWidth(lb) >> 1), y + 16, hot ? SK[n].light : "#4a4d54");
   };
 
-  const RK = () => (S?.hs || []).filter((h) => h.on_).slice(0, 7).map((h) => [h.id, h.id === "local" ? "ME" : h.id.replace(/[^a-z0-9]/gi, "").slice(0, 2).toUpperCase()]);
+  const RL = (id) => { if (id === "local") return "ME"; const m = id.match(/^([a-z])[a-z]*[-_ ]?(\d+)$/i); return (m ? m[1] + m[2] : id.replace(/[^a-z0-9]/gi, "")).slice(0, 3).toUpperCase(); };
+  const RK = () => (S?.hs || []).filter((h) => h.on_).slice(0, 7).map((h) => [h.id, RL(h.id)]);
   const rack = (x, y, t, h, lb) => {
     hits.push({ k: "h:" + h, b: [x - 9, y - 41, x + 9, y + 21], h });
     const jbs = (S?.q || []).filter((q) => q.h === h && ["repro", "fix", "ci", "review", "gate", "submit"].includes(q.st));
@@ -235,17 +238,21 @@
       px(x - 5, yy, 10, 5, "#141518");
       for (let j = 0; j < 2; j++) {
         const on = ci ? Math.floor(t * (5 + i) + j * 3 + i + x) % 3 !== 0 : busy ? Math.floor(t * 1.5 + i + j + x) % 4 === 0 : (i + j) % 5 === 0;
-        px(x + 1 + j * 2, yy + 2, 1, 1, down ? "#3a1f1d" : on ? (ci ? "#5cbf6a" : busy ? "#d97757" : "#3d4045") : "#232529");
+        px(x + 1 + j * 2, yy + 2, 1, 1, down ? "#2a1715" : on ? (ci ? "#5cbf6a" : busy ? "#d97757" : "#3d4045") : "#232529");
       }
       px(x - 3, yy + 2, 3, 1, "#26282d");
     }
-    const lamp = down ? "#e0675a" : ci ? (Math.floor(t * 2) % 2 ? "#4fb3e0" : "#2f86b0") : busy ? "#d97757" : "#3d4045";
+    const lamp = down ? (Math.floor(t * 2) % 2 ? "#e0675a" : "#4a1f1b") : ci ? (Math.floor(t * 2) % 2 ? "#4fb3e0" : "#2f86b0") : busy ? "#d97757" : "#3d4045";
     px(x - 2, y - 39, 4, 4, lamp);
     if (jbs.length > 1) K.text(c, String(jbs.length), x - 1, y - 46, "#b9bcc2");
-    K.text(c, lb, x - 3, y + 15, busy ? "#b9bcc2" : "#4a4d54");
+    K.text(c, lb, x - (K.textWidth(lb) >> 1), y + 15, down ? "#e0675a" : busy ? "#b9bcc2" : "#4a4d54");
   };
 
-  const short = (q) => (q.repo.split("/")[1] || q.repo).slice(0, 3).toUpperCase() + (q.pr || q.num || "H" + q.id);
+  const short = (q) => {
+    const n = String(q.pr || q.num || "H" + q.id), r = (q.repo.split("/")[1] || q.repo).toUpperCase();
+    for (let k = 3; k > 0; k--) if (K.textWidth(r.slice(0, k) + n) <= 30) return r.slice(0, k) + n;
+    return n;
+  };
 
   const intake = (t) => {
     seat("scout", 34, 74, t, {}, "SCOUT", S?.w?.scout?.st === "work");
@@ -258,18 +265,27 @@
   };
 
   const teams = (t) => {
-    const it = [];
-    for (const [n, stg] of TEAM) {
-      const js = (S?.q || []).filter((q) => q.st === stg || (n === "submit" && q.st === "gate"));
-      if (!js.length) it.push({ n, q: null, f: true, c: 0 });
-      else js.forEach((q, k) => it.push({ n, q, f: k === 0, c: js.length }));
-    }
-    let x = 22, row = 0, pv = null;
-    for (const i of it) {
-      if (pv && i.n !== pv) x += 10;
-      if (x > 292) { row++; x = 22; }
-      i.x = x; i.y = 164 + row * 68; x += 32; pv = i.n;
-    }
+    const ap = (S?.n?.approve || 0) > 0;
+    const tj = TEAM.map(([n, stg]) => [n, (S?.q || []).filter((q) => q.st === stg || (n === "submit" && q.st === "gate"))]);
+    const lay = (m) => {
+      const it = [];
+      for (const [n, js] of tj) {
+        if (!js.length) it.push({ n, q: null, f: true, c: 0 });
+        else js.slice(0, m).forEach((q, k) => it.push({ n, q, f: k === 0, c: js.length }));
+      }
+      let x = 22, row = 0, pv = null;
+      const lim = (r) => (r ? 360 : ap ? 278 : 370);
+      for (const i of it) {
+        if (pv && i.n !== pv) x += 10;
+        const tw = (it.filter((y) => y.n === i.n).length - 1) * 32;
+        if (i.f && row === 0 && x > 22 && x + tw > lim(0) && 22 + tw <= lim(1)) { row++; x = 22; }
+        if (x > lim(row)) { row++; x = 22; }
+        i.x = x; i.y = 164 + row * 68; i.r = row; x += 32; pv = i.n;
+      }
+      return it;
+    };
+    let m = Math.max(1, ...tj.map(([, js]) => js.length)), it = lay(m);
+    while (m > 1 && it.some((i) => i.r > 1)) it = lay(--m);
     for (const i of it) {
       if (i.f) {
         AN[i.n] = [i.x, i.y];
@@ -335,7 +351,7 @@
     }
     if (S?.o?.off) { c.globalAlpha = 0.25; px(0, 35, VW, VH - 35, "#000"); c.globalAlpha = 1; }
     const dp = window.devicePixelRatio || 1, sg = $("stage");
-    const sc = Math.max(1, Math.floor(Math.min((sg.clientWidth - 2) * dp / VW, (sg.clientHeight - 2) * dp / VH) * 2) / 2);
+    const sc = Math.max(1, Math.floor(Math.min((sg.clientWidth - 2) * dp / VW, (sg.clientHeight - 2) * dp / VH)));
     if (cv.width !== VW * sc) { cv.width = VW * sc; cv.height = VH * sc; cv.style.width = VW * sc / dp + "px"; cv.style.height = VH * sc / dp + "px"; }
     cx.imageSmoothingEnabled = false;
     cx.drawImage(off, 0, 0, VW * sc, VH * sc);
@@ -401,7 +417,7 @@
     $("queue").innerHTML = (q.length ? q.slice(0, 16).map((j) => jrow(j, true)).join("") : `<div class="empty">nothing waiting</div>`) + (S.dn.length ? `<div class="sub">recent</div>` + S.dn.slice(0, 12).map((j) => jrow(j, false)).join("") : "");
     const op = S.pr.filter((p) => p.st === "open").length, mg = S.pr.filter((p) => p.st === "merged").length;
     $("prn").textContent = `${op} open · ${mg} merged`;
-    $("prs").innerHTML = S.pr.length ? S.pr.slice(0, 16).map((p) => `<div class="row"><span class="pill ${p.st === "merged" ? "ok" : p.st === "closed" ? "bad" : "info"}">${p.st}</span><div class="ti"><a class="a" href="#" data-u="${esc(p.url)}">${esc(p.title)}</a></div><span class="rp">${esc(rn({ repo: p.repo, num: p.num }))}</span></div>`).join("") : `<div class="empty">no pull requests yet</div>`;
+    $("prs").innerHTML = S.pr.length ? S.pr.slice(0, 16).map((p) => `<div class="row"><span class="pill ${p.st === "merged" ? "ok" : p.st === "closed" ? "bad" : "info"}">${esc(p.st)}</span><div class="ti"><a class="a" href="#" data-u="${esc(p.url)}">${esc(p.title)}</a></div><span class="rp">${esc(rn({ repo: p.repo, num: p.num }))}</span></div>`).join("") : `<div class="empty">no pull requests yet</div>`;
     const m = Object.fromEntries(S.mg.map((x) => [x.d, x.n]));
     const days = [...Array(30)].map((_, i) => new Date(Date.now() - (29 - i) * 86400000).toISOString().slice(0, 10));
     const mx = Math.max(1, ...days.map((d) => m[d] || 0));
