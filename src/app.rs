@@ -142,6 +142,7 @@ pub fn dset() -> Value {
         "big": true,
         "hunters": 2,
         "tokday": 0,
+        "budday": 0,
         "ntfy": "",
         "discord": "",
         "updates": true,
@@ -286,6 +287,8 @@ impl App {
         let n = now();
         let td = self.set()["tokday"].as_i64().unwrap_or(0);
         let used = if td > 0 { self.db.n("select coalesce(sum(tin+tout),0) from tok where day=?", pa![crate::db::day()]) } else { 0 };
+        let bd = self.set()["budday"].as_f64().unwrap_or(0.0);
+        let bu = if bd > 0.0 { self.db.usd(None) } else { 0.0 };
         let mut l = self.lv.lock().unwrap();
         if l.o.rst > 0 && l.o.rst <= n {
             l.o.rl = "allowed".into();
@@ -297,6 +300,8 @@ impl App {
             format!("Claude usage limit reached, paused until {}", chrono::DateTime::from_timestamp_millis(l.o.rst).map(|d| d.with_timezone(&chrono::Local).format("%H:%M").to_string()).unwrap_or_default())
         } else if td > 0 && used >= td {
             "daily token limit reached, paused until midnight".into()
+        } else if bd > 0.0 && bu >= bd {
+            format!("daily budget of ${bd:.2} reached, paused until midnight")
         } else {
             String::new()
         };

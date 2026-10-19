@@ -1,0 +1,45 @@
+name: ApolloOffice report
+description: Send a failed workflow run to ApolloOffice as a bug report
+inputs:
+  url:
+    description: Address of your office, reachable from GitHub (for example through a tunnel)
+    required: true
+  token:
+    description: API token from Settings → API
+    required: true
+  repo:
+    description: Repository the report is for
+    default: ${{ github.repository }}
+  all-branches:
+    description: Also report failures on branches other than the default branch
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        AO_URL: ${{ inputs.url }}
+        AO_TOKEN: ${{ inputs.token }}
+        AO_REPO: ${{ inputs.repo }}
+        AO_ALL: ${{ inputs.all-branches }}
+        RUN_ID: ${{ github.event.workflow_run.id }}
+        RUN_URL: ${{ github.event.workflow_run.html_url }}
+        RUN_NAME: ${{ github.event.workflow_run.name }}
+        RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        RUN_END: ${{ github.event.workflow_run.conclusion }}
+        DEF_BRANCH: ${{ github.event.repository.default_branch }}
+      run: |
+        set -euo pipefail
+        if [ -z "$RUN_ID" ]; then echo "::error::run this action from a workflow_run trigger"; exit 1; fi
+        if [ "$RUN_END" != "failure" ]; then echo "run did not fail, nothing to report"; exit 0; fi
+        if [ "$AO_ALL" != "true" ] && [ "$RUN_BRANCH" != "$DEF_BRANCH" ]; then echo "failure on $RUN_BRANCH, not the default branch, skipped"; exit 0; fi
+        jobs=$(gh run view "$RUN_ID" -R "$GITHUB_REPOSITORY" --json jobs --jq '[.jobs[] | select(.conclusion=="failure") | .name + " (" + ([.steps[] | select(.conclusion=="failure") | .name] | join(", ")) + ")"] | join("; ")')
+        logs=$(gh run view "$RUN_ID" -R "$GITHUB_REPOSITORY" --log-failed 2>/dev/null | tail -c 15000 || true)
+        body=$(printf 'The workflow "%s" failed on %s (commit %s).\n\nFailed jobs and steps: %s\n\nRun: %s' "$RUN_NAME" "$RUN_BRANCH" "$RUN_SHA" "$jobs" "$RUN_URL")
+        jq -n --arg repo "$AO_REPO" --arg title "CI failure: $RUN_NAME on $RUN_BRANCH" --arg body "$body" --arg logs "$logs" --arg where "$jobs" --arg fp "ci:$RUN_NAME:$RUN_BRANCH:$jobs" \
+          '{repo: $repo, title: $title, body: $body, logs: $logs, where: $where, src: "GitHub Actions", fp: $fp}' > "$RUNNER_TEMP/ao-report.json"
+        code=$(curl -sS -o "$RUNNER_TEMP/ao-out.json" -w '%{http_code}' -X POST "${AO_URL%/}/v1/report" -H "Authorization: Bearer $AO_TOKEN" -H "Content-Type: application/json" --data-binary "@$RUNNER_TEMP/ao-report.json")
+        cat "$RUNNER_TEMP/ao-out.json"; echo
+        if [ "$code" -ge 300 ]; then echo "::error::ApolloOffice answered HTTP $code"; exit 1; fi

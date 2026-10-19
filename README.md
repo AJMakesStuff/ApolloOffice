@@ -50,6 +50,12 @@ ours.
 - **API** for bug reports from your own tools (error trackers, CI, scripts):
   `POST /v1/report` with a token from Settings. Reports go through Guard and
   Vet like issues.
+- **Error trackers and CI**: Sentry and GlitchTip alerts arrive through a
+  webhook link from Settings, and a failed GitHub Actions run can report itself
+  (see below). The same error lands in one report.
+- **Costs** per job, worker and repository, a daily budget in USD for API keys
+  (overall or per repository), and a table of which model gets merged how often
+  at what cost, with a hint when a cheaper one does as well.
 - **Sign in** with a one-time link or your Google account, notifications by
   ntfy or Discord, and automatic updates.
 
@@ -75,6 +81,30 @@ apollo-office status
 ```
 
 Options: `--port` (default 47300), `--data <folder>`.
+
+## Report failed CI runs
+
+Add a workflow that sends failed runs of your CI on the default branch to the
+office. The office has to be reachable from GitHub, for example through a
+tunnel. Store its address and an API token as repository secrets.
+
+```yaml
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+jobs:
+  report:
+    if: github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    steps:
+      - uses: Silvertree2010/ApolloOffice/report@main
+        with:
+          url: ${{ secrets.APOLLO_OFFICE_URL }}
+          token: ${{ secrets.APOLLO_OFFICE_TOKEN }}
+```
 
 ## AI disclosure
 

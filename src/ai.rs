@@ -82,7 +82,10 @@ pub async fn ask(a: &Ax, o: Ask) -> R<(String, Value)> {
     a.tick();
     loop {
         a.tick();
-        let p = a.lv.lock().unwrap().o.pause.clone();
+        let mut p = a.lv.lock().unwrap().o.pause.clone();
+        if p.is_empty() {
+            p = rbud(a, o.job).unwrap_or_default();
+        }
         if p.is_empty() {
             break;
         }
@@ -90,6 +93,44 @@ pub async fn ask(a: &Ax, o: Ask) -> R<(String, Value)> {
         sl(60_000).await;
     }
     ask1(a, o).await
+}
+
+pub fn rbud(a: &Ax, j: Option<i64>) -> Option<String> {
+    let r = a.db.jg(j?)?.repo;
+    let b = a.db.one("select bud from rp where full=?", crate::pa![r.clone()])?["bud"].as_f64().unwrap_or(0.0);
+    if b <= 0.0 || a.db.usd(Some(&r)) < b {
+        return None;
+    }
+    Some(format!("{r} reached its daily budget of ${b:.2}, waiting until midnight"))
+}
+
+pub fn cost(a: &Ax, o: &Ask, u: [i64; 4], usd: Option<f64>) {
+    a.tok(o.w, u[0] + u[1] + u[2], u[3]);
+    if u.iter().all(|x| *x == 0) && usd.is_none() {
+        return;
+    }
+    let sub = matches!(crate::prov::parse(&o.md).0, "cc" | "codex");
+    let c = usd.or_else(|| crate::prov::px(a, &o.md).map(|x| (0..4).map(|i| u[i] as f64 * x[i]).sum::<f64>() / 1e6));
+    let rp = o.job.and_then(|j| a.db.jg(j)).map(|j| j.repo).unwrap_or_default();
+    a.db.run("insert into cost(t,day,job,repo,w,md,sub,tin,tcw,tcr,tout,usd) values(?,?,?,?,?,?,?,?,?,?,?,?)", crate::pa![crate::db::now(), crate::db::day(), o.job, rp.clone(), o.w.to_string(), o.md.clone(), sub as i64, u[0], u[1], u[2], u[3], c]);
+    if sub {
+        return;
+    }
+    let d = crate::db::day();
+    let bd = a.set()["budday"].as_f64().unwrap_or(0.0);
+    if bd > 0.0 && a.db.usd(None) >= bd && a.db.kg("bud.n").as_str() != Some(&d) {
+        a.db.ks("bud.n", &json!(d));
+        a.note("Budget reached", &format!("The daily budget of ${bd:.2} is used up. The office pauses until midnight."), 4);
+        a.tick();
+    }
+    if rp.is_empty() {
+        return;
+    }
+    let k = format!("bud.n:{rp}");
+    if rbud(a, o.job).is_some() && a.db.kg(&k).as_str() != Some(&d) {
+        a.db.ks(&k, &json!(d));
+        a.note("Budget reached", &format!("{rp} used up its daily budget. Its jobs wait until midnight."), 4);
+    }
 }
 
 pub async fn ask1(a: &Ax, mut o: Ask) -> R<(String, Value)> {
@@ -159,7 +200,7 @@ async fn cc(a: &Ax, o: Ask) -> R<(String, Value)> {
     let txt = Mutex::new(String::new());
     let err = Mutex::new(String::new());
     let done = Mutex::new(false);
-    let us = Mutex::new((0i64, 0i64));
+    let us = Mutex::new(([0i64; 4], None::<f64>));
     let ax = a.clone();
     let w = o.w;
     let j = o.job;
@@ -182,7 +223,7 @@ async fn cc(a: &Ax, o: Ask) -> R<(String, Value)> {
             "result" => {
                 *txt.lock().unwrap() = d["result"].as_str().unwrap_or("").to_string();
                 let u = &d["usage"];
-                *us.lock().unwrap() = (u["input_tokens"].as_i64().unwrap_or(0) + u["cache_creation_input_tokens"].as_i64().unwrap_or(0) + u["cache_read_input_tokens"].as_i64().unwrap_or(0), u["output_tokens"].as_i64().unwrap_or(0));
+                *us.lock().unwrap() = ([u["input_tokens"].as_i64().unwrap_or(0), u["cache_creation_input_tokens"].as_i64().unwrap_or(0), u["cache_read_input_tokens"].as_i64().unwrap_or(0), u["output_tokens"].as_i64().unwrap_or(0)], d["total_cost_usd"].as_f64());
                 if d["is_error"].as_bool().unwrap_or(false) || d["subtype"] != "success" {
                     *err.lock().unwrap() = format!("{} {}", d["subtype"].as_str().unwrap_or(""), d["result"].as_str().unwrap_or(""));
                 }
@@ -212,8 +253,8 @@ async fn cc(a: &Ax, o: Ask) -> R<(String, Value)> {
         let _ = std::fs::remove_file(f);
         let _ = std::fs::remove_file(tf);
     }
-    let (ti, to) = *us.lock().unwrap();
-    a.tok(o.w, ti, to);
+    let (u, c) = *us.lock().unwrap();
+    cost(a, &o, u, c);
     let txt = txt.into_inner().unwrap();
     let er = format!("{} {}", err.into_inner().unwrap(), crate::sh::last(&r.e, 500));
     let dn = done.into_inner().unwrap();
@@ -265,7 +306,7 @@ async fn codex(a: &Ax, o: Ask) -> R<(String, Value)> {
     let txt = Mutex::new(String::new());
     let err = Mutex::new(String::new());
     let done = Mutex::new(false);
-    let us = Mutex::new((0i64, 0i64));
+    let us = Mutex::new([0i64; 4]);
     let ax = a.clone();
     let (w, j) = (o.w, o.job);
     let ln = |l: &str| {
@@ -287,7 +328,11 @@ async fn codex(a: &Ax, o: Ask) -> R<(String, Value)> {
             }
             "turn.completed" => {
                 let u = &d["usage"];
-                *us.lock().unwrap() = (u["input_tokens"].as_i64().unwrap_or(0), u["output_tokens"].as_i64().unwrap_or(0));
+                let ci = u["cached_input_tokens"].as_i64().unwrap_or(0);
+                let mut g = us.lock().unwrap();
+                g[0] += (u["input_tokens"].as_i64().unwrap_or(0) - ci).max(0);
+                g[2] += ci;
+                g[3] += u["output_tokens"].as_i64().unwrap_or(0);
                 *done.lock().unwrap() = true;
             }
             "turn.failed" | "error" => {
@@ -306,8 +351,8 @@ async fn codex(a: &Ax, o: Ask) -> R<(String, Value)> {
         txt = std::fs::read_to_string(&lf).unwrap_or_default();
     }
     let _ = std::fs::remove_dir_all(&rd);
-    let (ti, to) = *us.lock().unwrap();
-    a.tok(o.w, ti, to);
+    let u = *us.lock().unwrap();
+    cost(a, &o, u, None);
     let er = format!("{} {}", err.into_inner().unwrap(), crate::sh::last(&r.e, 500));
     if regex::Regex::new(LIM).unwrap().is_match(&er) && txt.trim().is_empty() {
         return Err(X::Lim(crate::sh::head(er.trim(), 200)));
@@ -362,7 +407,7 @@ async fn api(a: &Ax, o: Ask) -> R<(String, Value)> {
     let dl = std::time::Instant::now() + Duration::from_secs(o.t);
     let left = || dl.saturating_duration_since(std::time::Instant::now()).max(Duration::from_secs(5));
     a.st(o.w, "work", o.job, "");
-    let (mut ti, mut to) = (0i64, 0i64);
+    let mut u = [0i64; 4];
     let say = |t: &str| {
         let s = unthink(t);
         if !s.is_empty() && !s.starts_with("```") && !s.starts_with('{') {
@@ -399,9 +444,9 @@ async fn api(a: &Ax, o: Ask) -> R<(String, Value)> {
                     b["tools"] = json!(tools);
                 }
                 let r = post(a, &format!("{base}/v1/messages"), &h, &b, left()).await?;
-                let u = &r["usage"];
-                ti += u["input_tokens"].as_i64().unwrap_or(0) + u["cache_creation_input_tokens"].as_i64().unwrap_or(0) + u["cache_read_input_tokens"].as_i64().unwrap_or(0);
-                to += u["output_tokens"].as_i64().unwrap_or(0);
+                for (i, k) in ["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens"].iter().enumerate() {
+                    u[i] += r["usage"][k].as_i64().unwrap_or(0);
+                }
                 let ct = r["content"].as_array().cloned().unwrap_or_default();
                 let txt: String = ct.iter().filter(|c| c["type"] == "text").filter_map(|c| c["text"].as_str()).collect::<Vec<_>>().join("\n");
                 say(&txt);
@@ -440,8 +485,10 @@ async fn api(a: &Ax, o: Ask) -> R<(String, Value)> {
                     b["options"] = json!({"num_ctx": a.set()["prov"]["ollama"]["ctx"].as_i64().unwrap_or(32768)});
                 }
                 let r = post(a, &if ol { format!("{base}/api/chat") } else { format!("{base}/chat/completions") }, &h, &b, left()).await?;
-                ti += r["usage"]["prompt_tokens"].as_i64().or(r["prompt_eval_count"].as_i64()).unwrap_or(0);
-                to += r["usage"]["completion_tokens"].as_i64().or(r["eval_count"].as_i64()).unwrap_or(0);
+                let ci = r["usage"]["prompt_tokens_details"]["cached_tokens"].as_i64().unwrap_or(0);
+                u[0] += (r["usage"]["prompt_tokens"].as_i64().or(r["prompt_eval_count"].as_i64()).unwrap_or(0) - ci).max(0);
+                u[2] += ci;
+                u[3] += r["usage"]["completion_tokens"].as_i64().or(r["eval_count"].as_i64()).unwrap_or(0);
                 let m = if ol { r["message"].clone() } else { r["choices"][0]["message"].clone() };
                 let txt = m["content"].as_str().unwrap_or("").to_string();
                 say(&txt);
@@ -472,7 +519,7 @@ async fn api(a: &Ax, o: Ask) -> R<(String, Value)> {
         Err(X::E(format!("too many steps (limit {mx})")))
     }
     .await;
-    a.tok(o.w, ti, to);
+    cost(a, &o, u, None);
     let txt = res?;
     if txt.trim().is_empty() {
         return Err(X::E(format!("{} returned an empty answer", crate::prov::name(&o.md))));
@@ -557,6 +604,14 @@ mod t {
             o.rn = Some(Rn { h: "local".into(), dir: dd.join("repo").display().to_string(), w: String::new() });
             let (_, js) = ask1(&a, o).await.unwrap();
             assert_eq!(js["ok"], true, "{fmt}");
+            let c = a.db.one("select sum(tin) i, sum(tout) o, sum(usd) u, max(sub) s from cost where w='fixer'", crate::pa![]).unwrap();
+            if fmt == "anthropic" {
+                assert_eq!(c["i"], 30);
+                assert!((c["u"].as_f64().unwrap() - (30.0 * 2.0 + 10.0 * 10.0) / 1e6).abs() < 1e-12, "{c}");
+            } else {
+                assert_eq!(c["u"].as_f64().unwrap(), 0.0);
+            }
+            assert_eq!(c["s"], 0);
             let g = seen.lock().unwrap();
             assert_eq!(g.len(), 2, "{fmt}");
             let last = g[1]["messages"].as_array().unwrap().last().unwrap().clone();

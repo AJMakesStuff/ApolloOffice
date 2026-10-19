@@ -16,6 +16,8 @@
     for (const e of f.querySelectorAll("[name]")) o[e.name] = e.type === "checkbox" ? e.checked : e.type === "number" ? Number(e.value) : e.value;
     return o;
   };
+  const usd = (v) => v == null ? "–" : "$" + (v > 0 && v < 0.01 ? v.toFixed(4) : v.toFixed(2));
+  A.usd = usd;
   const busy = (b, on, t) => { b.disabled = on; if (t) b.textContent = t; };
 
   const diff = (d) => esc(d || "").split("\n").map((l) => `<span class="${l.startsWith("diff --git") ? "fh" : l.startsWith("@@") ? "hh" : l.startsWith("+") && !l.startsWith("+++") ? "ad" : l.startsWith("-") && !l.startsWith("---") ? "rm" : ""}">${l}</span>`).join("\n");
@@ -36,6 +38,7 @@
         <label>Pull requests</label><select name="mode"><option value="ask" ${r.mode !== "auto" ? "selected" : ""}>wait for my approval</option><option value="auto" ${r.mode === "auto" ? "selected" : ""}>submit automatically</option></select>
         <label>Max open PRs</label><input type="number" name="maxo" min="0" max="10000" value="${r.maxo}">
         <label>Max new PRs per day</label><input type="number" name="maxd" min="0" max="10000" value="${r.maxd}">
+        <label>Daily budget</label><input type="number" name="bud" min="0" step="0.01" value="${r.bud || 0}"><div class="hint">USD for API keys, 0 = no limit. Jobs of this repository wait until midnight once it is used up.</div>
         <label>PR footer</label>${tg("nm", r.nm ?? 1, "mention ApolloOffice with a link")}
         <div class="hint">The AI note and the Co-Authored-By trailers are always added.</div>
         <label>Your rules</label><textarea name="rules" placeholder="optional, e.g. only issues labeled bug; never touch the plugin API">${esc(r.rules)}</textarea>
@@ -222,6 +225,12 @@
   -d '{"repo":"owner/name","title":"Crash on empty input","body":"Steps and what happens","logs":"stack trace","src":"Sentry"}'</pre>
         <div class="hint">Or send <code>{"repo":"owner/name","issue":42}</code> to have an existing issue picked up now. <code>GET /v1/report?id=…</code> returns the state and the PR link. Reports go through Guard and Vet like issues; only this computer can reach the API.</div>
         <div class="acts"><button type="button" id="an">${cfg.api.on ? "Replace token" : "Create token"}</button>${cfg.api.on ? `<button type="button" class="dng" id="ao">Revoke</button>` : ""}</div></div></div>
+      <div class="sec"><h4>Error trackers</h4><div class="box">
+        <div class="ck">${cfg.hook.on ? `<b class="ok2">On</b> link created ${new Date(cfg.hook.t0).toLocaleDateString()}` : "Off. Create a link to let Sentry or GlitchTip send errors as reports."}</div>
+        <div id="htk" hidden><input type="text" readonly id="htv" style="margin-top:8px"><div class="hint" style="margin-top:6px">Copy it now, the key is shown only once. Replace owner/name with the repository.</div></div>
+        <div class="hint" style="margin-top:6px">Sentry: add an internal integration with this webhook URL and alert rule actions. GlitchTip: add it as a webhook alert. The office has to be reachable from the internet for this, for example through a tunnel; use that address instead of 127.0.0.1. The same error goes into one report.</div>
+        <div class="hint">GitHub Actions: a failed run can report itself with <code>Silvertree2010/ApolloOffice/report</code>, see the README.</div>
+        <div class="acts"><button type="button" id="hn">${cfg.hook.on ? "Replace link" : "Create link"}</button>${cfg.hook.on ? `<button type="button" class="dng" id="ho">Revoke</button>` : ""}</div></div></div>
       <div class="sec"><h4>Updates</h4><div class="box">${tg("updates", s.updates, "install updates automatically when the office is idle")}<div class="msg" id="um">${ust}</div><div class="acts"><button type="button" id="uc">Check now</button>${u.ready && u.ready !== A.S?.v ? `<button type="button" class="pri" id="ua">Install and restart</button>` : ""}</div></div></div>
       <div class="sec"><h4>This installation</h4><div class="box"><div class="fm" style="margin:0">
         <label>Start at login</label>${tg("auto", cfg.auto, "start ApolloOffice when I log in")}
@@ -253,9 +262,46 @@
       await settings();
       $("atk").hidden = false; $("atv").value = r.tok; $("atv").select();
     };
+    $("hn").onclick = async (e) => {
+      if (cfg.hook.on && e.target.dataset.sure !== "1") { e.target.dataset.sure = "1"; e.target.textContent = "Click again, the old link stops working"; return; }
+      const r = await post({ op: "new" }, "/api/hooktok");
+      if (!r.tok) return;
+      await settings();
+      $("htk").hidden = false; $("htv").value = `http://127.0.0.1:${cfg.api.port}/v1/hook?repo=owner/name&key=${r.tok}`; $("htv").select();
+    };
+    if ($("ho")) $("ho").onclick = async (e) => { if (e.target.dataset.sure !== "1") { e.target.dataset.sure = "1"; e.target.textContent = "Click again to revoke"; return; } await post({ op: "off" }, "/api/hooktok"); settings(); };
     if ($("ao")) $("ao").onclick = async (e) => { if (e.target.dataset.sure !== "1") { e.target.dataset.sure = "1"; e.target.textContent = "Click again to revoke"; return; } await post({ op: "off" }, "/api/apitok"); settings(); };
     $("uc").onclick = async (e) => { busy(e.target, true, "Checking…"); const r = await post({ op: "check" }, "/api/update"); await settings(); $("um").textContent = r.ok ? (r.r.new ? `Update ${r.r.latest} downloaded.` : `Up to date (latest ${r.r.latest}).`) : r.m; };
     if ($("ua")) $("ua").onclick = async (e) => { busy(e.target, true, "Restarting…"); await post({ op: "apply" }, "/api/update"); setTimeout(() => location.reload(), 6000); };
+  };
+
+  const costs = async () => {
+    const c = await get("/api/cost");
+    if (c.error) return;
+    show("Costs", "cost");
+    const t = c.today || {}, px = c.px || {};
+    const tb = (h, rs) => `<div class="tw"><table class="tb"><tr>${h.map((x) => `<th class="${x[1] || ""}">${x[0]}</th>`).join("")}</tr>${rs.join("")}</table></div>`;
+    const rate = (a, b) => b ? Math.round(100 * a / b) + "%" : "–";
+    B.innerHTML = `<div class="sec"><h4>Today</h4><div class="box"><div class="ck"><b>${usd(t.usd || 0)}</b>&nbsp;API keys${t.val ? ` · ${usd(t.val)} value on Claude Code and Codex logins` : ""}${t.unk ? ` · ${t.unk} calls without a known price` : ""}</div>
+        <form id="fb" class="fm"><label>Daily budget</label><input type="number" name="budday" min="0" step="0.01" value="${c.budday || 0}"><div class="hint">USD for API keys, 0 = no limit. When it is used up the office pauses until midnight and notifies you. Logins with a subscription do not count. Per repository under Repos.</div></form>
+        <div class="acts"><button class="pri" id="bb">Save</button></div><div class="msg" id="bm"></div></div></div>
+      ${c.hints.length ? `<div class="sec"><h4>Hints</h4>${c.hints.map((h) => `<div class="box"><div class="ck">${esc(h)}</div></div>`).join("")}</div>` : ""}
+      <div class="sec"><h4>Last 14 days</h4>${c.days.length ? tb([["Day"], ["API", "n"], ["Login value", "n"]], c.days.map((d) => `<tr><td>${esc(d.day)}</td><td class="n">${usd(d.usd)}</td><td class="n">${usd(d.val)}</td></tr>`)) : `<div class="empty">Nothing yet.</div>`}</div>
+      <div class="sec"><h4>Repositories, 30 days</h4>${c.repos.length ? tb([["Repository"], ["Jobs", "n"], ["API", "n"], ["Login value", "n"]], c.repos.map((r) => `<tr><td>${esc(r.repo)}</td><td class="n">${r.jobs}</td><td class="n">${usd(r.usd)}</td><td class="n">${usd(r.val)}</td></tr>`)) : `<div class="empty">Nothing yet.</div>`}</div>
+      <div class="sec"><h4>Models per worker, 90 days</h4>${c.stats.length ? tb([["Repository"], ["Worker"], ["Model"], ["Jobs", "n"], ["PRs", "n"], ["Merged", "n"], ["Rejected", "n"], ["Per job", "n"], ["Per merge", "n"]], c.stats.map((r) => `<tr><td>${esc(r.repo)}</td><td>${esc(A.NM?.[r.w] || r.w)}</td><td>${esc(r.nm)}${r.sub ? " (login)" : ""}</td><td class="n">${r.jobs}</td><td class="n">${r.prs}</td><td class="n">${r.mg} · ${rate(r.mg, r.prs)}</td><td class="n">${r.cl}</td><td class="n">${usd(r.usd == null ? null : r.usd / r.jobs)}</td><td class="n">${r.mg && r.usd != null ? usd(r.usd / r.mg) : "–"}</td></tr>`)) : `<div class="empty">Nothing yet.</div>`}<div class="hint" style="margin-top:6px">A job counts for every worker that worked on it. Hints show up once two models did at least 5 jobs each for the same worker. The office never switches models by itself.</div></div>
+      <div class="sec"><h4>Prices</h4><div class="box"><textarea id="px" placeholder="model input output, e.g. gpt-5.5 5 30" style="min-height:70px">${esc(Object.entries(px).map(([k, v]) => k + " " + v.join(" ")).join("\n"))}</textarea><div class="hint" style="margin-top:6px">USD per million tokens, one model per line: <code>model input output</code> or <code>model input cache-write cache-read output</code>. Overrides the built-in prices. Claude Code reports its own cost.</div><div class="acts"><button id="pb">Save prices</button></div><div class="msg" id="pm"></div></div></div>`;
+    $("fb").onsubmit = (e) => e.preventDefault();
+    $("bb").onclick = async () => { const r = await post({ budday: Number($("fb").budday.value) }, "/api/set"); $("bm").className = r.error ? "msg bad2" : "msg"; $("bm").textContent = r.error || "Saved."; };
+    $("pb").onclick = async () => {
+      const o = {}, bad = [];
+      for (const l of $("px").value.split("\n").map((x) => x.trim()).filter(Boolean)) {
+        const [k, ...v] = l.split(/\s+/), n = v.map(Number);
+        if ((n.length === 2 || n.length === 4) && n.every((x) => isFinite(x) && x >= 0)) o[k] = n; else bad.push(k);
+      }
+      if (bad.length) { $("pm").className = "msg bad2"; $("pm").textContent = "Check the line for " + bad.join(", "); return; }
+      const r = await post({ px: o }, "/api/set");
+      $("pm").className = r.error ? "msg bad2" : "msg"; $("pm").textContent = r.error || "Saved.";
+    };
   };
 
   const job = async (id) => {
@@ -264,9 +310,10 @@
     jid = id;
     show(j.st === "approve" ? "Review pull request" : "Job " + id, "job");
     const tag = (j.repo.split("/")[1] || j.repo) + (j.num ? "#" + j.num : "");
+    const cs = j.cost && j.cost.n ? `<div class="msg">Cost: ${j.cost.usd != null ? usd(j.cost.usd) + " API" : ""}${j.cost.usd != null && j.cost.val != null ? " · " : ""}${j.cost.val != null ? usd(j.cost.val) + " login value" : ""}${j.cost.usd == null && j.cost.val == null ? "unknown" : ""} · ${Math.round((j.cost.ti || 0) / 1000)}k in, ${Math.round((j.cost.tou || 0) / 1000)}k out</div>` : "";
     const ev = (j.ev || []).map((e) => `<div><span class="tm">${new Date(e.t).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</span><span>${esc(e.w)}</span><span>${esc(e.m)}</span></div>`).join("");
     if (j.st === "approve") {
-      B.innerHTML = `<div class="sec"><div class="box"><div class="hd2"><b>${esc(j.repo)}${j.num ? " #" + j.num : j.ext ? " (reported by " + esc(j.ext) + ")" : " (found by Hunter)"}</b>${j.url ? `<a class="a" href="#" data-u="${esc(j.url)}">${j.num ? "open issue" : "open repository"}</a>` : ""}</div><div class="msg">Built and tested on ${esc(j.h || "")}. Nothing is on GitHub yet.</div></div></div>
+      B.innerHTML = `<div class="sec"><div class="box"><div class="hd2"><b>${esc(j.repo)}${j.num ? " #" + j.num : j.ext ? " (reported by " + esc(j.ext) + ")" : " (found by Hunter)"}</b>${j.url ? `<a class="a" href="#" data-u="${esc(j.url)}">${j.num ? "open issue" : "open repository"}</a>` : ""}</div><div class="msg">Built and tested on ${esc(j.h || "")}. Nothing is on GitHub yet.</div>${cs}</div></div>
       <div class="sec"><h4>Pull request</h4><input type="text" id="pt" value="${esc(j.pt || j.title)}"><textarea id="pb" style="min-height:220px;margin-top:8px">${esc(j.pb || "")}</textarea></div>
       ${j.proof ? `<div class="sec"><h4>Proof</h4><pre class="df">${esc((j.proof.a || "") + "\n\n" + (j.proof.b || ""))}</pre></div>` : ""}
       <div class="sec"><h4>Diff</h4><pre class="df">${diff(j.df)}</pre></div>
@@ -284,7 +331,7 @@
       };
       return;
     }
-    B.innerHTML = `<div class="sec"><div class="box"><div class="hd2"><b>${esc(j.title)}</b><span class="pill">${esc(j.st)}</span></div><div class="msg">${esc(j.repo)} ${esc(tag)} · ${esc(j.kind)}${j.h ? " · " + esc(j.h) : ""}\n${esc(j.why || "")}</div>
+    B.innerHTML = `<div class="sec"><div class="box"><div class="hd2"><b>${esc(j.title)}</b><span class="pill">${esc(j.st)}</span></div><div class="msg">${esc(j.repo)} ${esc(tag)} · ${esc(j.kind)}${j.h ? " · " + esc(j.h) : ""}\n${esc(j.why || "")}</div>${cs}
       <div class="acts">${j.url ? `<button data-u="${esc(j.url)}">Open on GitHub</button>` : ""}${!["done", "drop"].includes(j.st) ? `<button class="dng" data-d="${id}">Drop</button>` : ""}${j.st === "drop" && j.kind === "fix" ? `<button data-rq="${id}">Try again</button>` : ""}</div></div></div>
       ${j.df ? `<div class="sec"><h4>Diff</h4><pre class="df">${diff(j.df)}</pre></div>` : ""}
       <div class="sec"><h4>Log</h4><div class="log">${ev || `<div class="empty">nothing yet</div>`}</div></div>`;
@@ -307,6 +354,7 @@
   };
 
   $("bRepos").onclick = repos;
+  $("bCost").onclick = costs;
   $("bHosts").onclick = hosts;
   A.hosts = hosts;
   $("bSet").innerHTML = A.GEAR;

@@ -74,16 +74,21 @@ fn page(b: &str) -> Response<Body> {
 fn state(a: &Ax) -> Value {
     let d = crate::db::day();
     let mut tk = json!({});
-    for t in a.db.all("select w, tin+tout n from tok where day=?", pa![d]) {
+    for t in a.db.all("select w, tin+tout n from tok where day=?", pa![d.clone()]) {
         tk[t["w"].as_str().unwrap_or("")] = t["n"].clone();
     }
     let (w, o, fl, ln, cil, hst) = {
         let l = a.lv.lock().unwrap();
         (json!(l.w), json!(l.o), json!(l.fl.iter().filter(|f| now() - f.t < 8000).collect::<Vec<_>>()), json!(l.ln.iter().map(|(k, v)| (k.to_string(), v.clone())).collect::<std::collections::HashMap<_, _>>()), json!(l.cil.iter().map(|(k, v)| (k.to_string(), v.clone())).collect::<std::collections::HashMap<_, _>>()), json!(l.hst))
     };
+    let mut cs = json!({});
+    for t in a.db.all("select w, sum(case when sub=0 then usd end) a, sum(case when sub=1 then usd end) v from cost where day=? group by w", pa![d.clone()]) {
+        cs[t["w"].as_str().unwrap_or("")] = json!([t["a"], t["v"]]);
+    }
     let mut wv = w;
     for x in WS {
         wv[*x]["tk"] = tk[*x].clone();
+        wv[*x]["cs"] = cs[*x].clone();
         if wv[*x]["md"].as_str().map(|s| s.is_empty()).unwrap_or(true) && *x != "ci" && *x != "submit" {
             wv[*x]["md"] = json!(a.md(x));
         }
@@ -124,7 +129,45 @@ async fn checks(a: &Ax) -> Value {
 }
 
 fn cfg(a: &Ax) -> Value {
-    json!({"repos": a.db.all("select * from rp order by full", pa![]), "hosts": a.db.all("select * from hs order by id='local' desc, id", pa![]), "set": a.set(), "data": a.dd.display().to_string(), "auto": crate::sys::autostart_on(), "prov": crate::prov::status(a), "google": crate::goog::linked(a)["email"], "upd": a.db.kg("upd"), "asset": crate::upd::asset(), "api": {"on": a.db.kg("api")["h"].is_string(), "t0": a.db.kg("api")["t0"], "last": a.db.kg("api")["last"], "port": a.port}})
+    json!({"repos": a.db.all("select * from rp order by full", pa![]), "hosts": a.db.all("select * from hs order by id='local' desc, id", pa![]), "set": a.set(), "data": a.dd.display().to_string(), "auto": crate::sys::autostart_on(), "prov": crate::prov::status(a), "google": crate::goog::linked(a)["email"], "upd": a.db.kg("upd"), "asset": crate::upd::asset(), "api": {"on": a.db.kg("api")["h"].is_string(), "t0": a.db.kg("api")["t0"], "last": a.db.kg("api")["last"], "port": a.port}, "hook": {"on": a.db.kg("hook")["h"].is_string(), "t0": a.db.kg("hook")["t0"]}})
+}
+
+fn costs(a: &Ax) -> Value {
+    let t30 = now() - 30 * 86_400_000;
+    let rows = a.db.all("select c.repo, c.w, c.md, count(distinct c.job) jobs, count(distinct case when j.pr is not null then c.job end) prs, count(distinct case when p.st='merged' then c.job end) mg, count(distinct case when p.st='closed' then c.job end) cl, sum(c.usd) usd, max(c.sub) sub from cost c join jobs j on j.id=c.job left join prs p on p.repo=j.repo and p.num=j.pr where c.job is not null and c.t>=? group by 1,2,3 order by 1,2,4 desc", pa![now() - 90 * 86_400_000]);
+    let mut st = vec![];
+    for r in &rows {
+        let mut x = r.clone();
+        x["nm"] = json!(crate::prov::name(r["md"].as_str().unwrap_or("")));
+        st.push(x);
+    }
+    json!({
+        "today": a.db.one("select sum(case when sub=0 then usd end) usd, sum(case when sub=1 then usd end) val, sum(case when usd is null then 1 else 0 end) unk from cost where day=?", pa![crate::db::day()]),
+        "days": a.db.all("select day, sum(case when sub=0 then usd end) usd, sum(case when sub=1 then usd end) val from cost where day>=date('now','localtime','-13 day') group by day order by day desc", pa![]),
+        "repos": a.db.all("select repo, sum(case when sub=0 then usd end) usd, sum(case when sub=1 then usd end) val, count(distinct job) jobs from cost where t>=? and repo<>'' group by repo order by 2 desc", pa![t30]),
+        "stats": st,
+        "hints": hints(&rows),
+        "budday": a.set()["budday"],
+        "px": a.set()["px"],
+    })
+}
+
+pub fn hints(rows: &[Value]) -> Vec<String> {
+    let f = |v: &Value, k: &str| v[k].as_f64().unwrap_or(0.0);
+    let mut o = vec![];
+    for x in rows {
+        for y in rows {
+            if x["repo"] != y["repo"] || x["w"] != y["w"] || x["md"] == y["md"] || f(x, "jobs") < 5.0 || f(y, "jobs") < 5.0 {
+                continue;
+            }
+            let (cx, cy) = (f(x, "usd") / f(x, "jobs"), f(y, "usd") / f(y, "jobs"));
+            let (rx, ry) = (f(x, "mg") / f(x, "jobs"), f(y, "mg") / f(y, "jobs"));
+            if cy > 0.0 && cx >= cy * 2.0 && ry + 0.05 >= rx {
+                o.push(format!("{} on {}: {} gets as many merges per job as {} at {:.0}× lower cost", x["w"].as_str().unwrap_or(""), x["repo"].as_str().unwrap_or(""), crate::prov::name(y["md"].as_str().unwrap_or("")), crate::prov::name(x["md"].as_str().unwrap_or("")), cx / cy));
+            }
+        }
+    }
+    o
 }
 
 fn th(t: &str) -> String {
@@ -183,6 +226,17 @@ fn rep(a: &Ax, b: &Value) -> Result<Value, (StatusCode, String)> {
     if ti.is_empty() || bd.is_empty() {
         return bad("title and body are required (or issue)");
     }
+    let fp: String = b["fp"].as_str().unwrap_or("").chars().filter(|c| !c.is_control()).take(300).collect();
+    if !fp.is_empty() {
+        if let Some(x) = a.db.one("select id, d from jobs where repo=? and json_extract(d,'$.ext.fp')=? and st not in ('done','drop')", pa![r.clone(), fp.clone()]) {
+            let id = x["id"].as_i64().unwrap_or(0);
+            if let Some(mut j) = a.db.jg(id) {
+                j.d["ext"]["n"] = json!(j.d["ext"]["n"].as_i64().unwrap_or(1) + 1);
+                a.db.jd(&j);
+            }
+            return Ok(json!({"id": id, "new": false}));
+        }
+    }
     let wh: String = b["where"].as_str().unwrap_or("").trim().chars().take(300).collect();
     let lg = b["logs"].as_str().unwrap_or("").trim();
     let mut body = cut(&bd, 20000);
@@ -192,7 +246,7 @@ fn rep(a: &Ax, b: &Value) -> Result<Value, (StatusCode, String)> {
     if !lg.is_empty() {
         body.push_str(&format!("\n\nLogs:\n```\n{}\n```", cut(lg, 20000)));
     }
-    let id = a.db.jnew(&r, 0, "fix", &ti, &format!("https://github.com/{r}"), "vet", &format!("reported{}", if src.is_empty() { String::new() } else { format!(" by {src}") }), json!({"api": 1, "ext": {"src": if src.is_empty() { "an external tool".to_string() } else { src.clone() }, "where": wh}, "title": ti, "body": body}), None, -0.7);
+    let id = a.db.jnew(&r, 0, "fix", &ti, &format!("https://github.com/{r}"), "vet", &format!("reported{}", if src.is_empty() { String::new() } else { format!(" by {src}") }), json!({"api": 1, "ext": {"src": if src.is_empty() { "an external tool".to_string() } else { src.clone() }, "where": wh, "fp": fp}, "title": ti, "body": body}), None, -0.7);
     a.flow("scout", "vet", &r);
     a.say("scout", &format!("{r} report {id} received{}: {ti}", if src.is_empty() { String::new() } else { format!(" from {src}") }), Some(id));
     Ok(json!({"id": id, "new": true}))
@@ -204,7 +258,90 @@ fn repst(a: &Ax, id: i64) -> Option<Value> {
     Some(json!({"id": j["id"], "repo": j["repo"], "issue": if j["num"].as_i64().unwrap_or(0) > 0 { j["num"].clone() } else { Value::Null }, "st": j["st"], "why": j["why"], "pr": pu, "t0": j["t0"], "t1": j["t1"]}))
 }
 
+pub fn trk(v: &Value) -> Option<Value> {
+    let s = |x: &Value| x.as_str().unwrap_or("").trim().to_string();
+    if let Some(at) = v["attachments"].as_array().and_then(|x| x.first()) {
+        let ti = s(&at["title"]);
+        if ti.is_empty() {
+            return None;
+        }
+        let mut b = format!("Error tracker alert from GlitchTip: {ti}");
+        if !s(&at["text"]).is_empty() {
+            b.push_str(&format!("\n\nCulprit: {}", s(&at["text"])));
+        }
+        for f in at["fields"].as_array().cloned().unwrap_or_default() {
+            b.push_str(&format!("\n{}: {}", s(&f["title"]), s(&f["value"])));
+        }
+        let ln = s(&at["title_link"]);
+        if !ln.is_empty() {
+            b.push_str(&format!("\nLink: {ln}"));
+        }
+        return Some(json!({"title": ti, "body": b, "where": s(&at["text"]), "src": "GlitchTip", "fp": format!("gt:{ln}")}));
+    }
+    let d = &v["data"];
+    let e = if d["event"].is_object() { &d["event"] } else { &d["error"] };
+    let i = &d["issue"];
+    let ti = [s(&e["title"]), s(&i["title"])].into_iter().find(|x| !x.is_empty())?;
+    let wh = [s(&e["culprit"]), s(&i["culprit"]), s(&e["location"])].into_iter().find(|x| !x.is_empty()).unwrap_or_default();
+    let mut b = format!("Error tracker alert from Sentry: {ti}");
+    if !wh.is_empty() {
+        b.push_str(&format!("\n\nCulprit: {wh}"));
+    }
+    let msg = [s(&e["message"]), s(&e["logentry"]["formatted"])].into_iter().find(|x| !x.is_empty()).unwrap_or_default();
+    if !msg.is_empty() && msg != ti {
+        b.push_str(&format!("\nMessage: {msg}"));
+    }
+    for (k, n) in [("release", "Release"), ("environment", "Environment"), ("platform", "Platform")] {
+        if !s(&e[k]).is_empty() {
+            b.push_str(&format!("\n{n}: {}", s(&e[k])));
+        }
+    }
+    let mut st = String::new();
+    for x in e["exception"]["values"].as_array().cloned().unwrap_or_default() {
+        st.push_str(&format!("\n{}: {}", s(&x["type"]), s(&x["value"])));
+        let fr = x["stacktrace"]["frames"].as_array().cloned().unwrap_or_default();
+        let ap: Vec<&Value> = fr.iter().filter(|f| f["in_app"].as_bool().unwrap_or(false)).collect();
+        let fs: Vec<&Value> = if ap.is_empty() { fr.iter().collect() } else { ap };
+        for f in fs.iter().rev().take(15) {
+            st.push_str(&format!("\n  at {} ({}:{})", s(&f["function"]), [s(&f["filename"]), s(&f["abs_path"]), s(&f["module"])].into_iter().find(|x| !x.is_empty()).unwrap_or_default(), f["lineno"].as_i64().map(|n| n.to_string()).unwrap_or_default()));
+        }
+    }
+    if st.is_empty() && i["metadata"].is_object() {
+        let m = &i["metadata"];
+        st = format!("\n{}: {} in {} ({})", s(&m["type"]), s(&m["value"]), s(&m["function"]), s(&m["filename"]));
+    }
+    let ln = [s(&e["web_url"]), s(&i["web_url"]), s(&i["permalink"])].into_iter().find(|x| !x.is_empty()).unwrap_or_default();
+    if !ln.is_empty() {
+        b.push_str(&format!("\nLink: {ln}"));
+    }
+    let id = [s(&i["id"]), s(&e["issue_id"]), s(&e["groupID"]), e["issue_id"].as_i64().map(|n| n.to_string()).unwrap_or_default(), i["id"].as_i64().map(|n| n.to_string()).unwrap_or_default()].into_iter().find(|x| !x.is_empty()).unwrap_or_else(|| ti.clone());
+    Some(json!({"title": ti, "body": b, "where": wh, "logs": st.trim(), "src": "Sentry", "fp": format!("sentry:{id}")}))
+}
+
+async fn hook(a: &Ax, q: &str, b: Body) -> Response<Body> {
+    let qv = |k: &str| q.split('&').find_map(|x| x.strip_prefix(&format!("{k}="))).unwrap_or("").to_string();
+    let k = a.db.kg("hook");
+    let t = qv("key");
+    if t.len() < 20 || k["h"].as_str() != Some(&th(&t)) {
+        return er(StatusCode::UNAUTHORIZED, "missing or wrong key (Settings → Error trackers)");
+    }
+    let Ok(by) = to_bytes(b, 1 << 20).await else { return er(StatusCode::PAYLOAD_TOO_LARGE, "body larger than 1 MB") };
+    let Ok(v) = serde_json::from_slice::<Value>(&by) else { return er(StatusCode::BAD_REQUEST, "body must be JSON") };
+    if v["action"].as_str().is_some_and(|x| !matches!(x, "created" | "triggered")) {
+        return js(json!({"ok": true, "skip": "action"}));
+    }
+    let Some(mut r) = trk(&v) else { return js(json!({"ok": true, "skip": "no error in payload"})) };
+    r["repo"] = json!(qv("repo").replace("%2F", "/").replace("%2f", "/"));
+    match rep(a, &r) {
+        Ok(x) => js(x),
+        Err((c, e)) => er(c, &e),
+    }
+}
+
 async fn v1(a: &Ax, m: &Method, p: &str, q: &str, hd: &HeaderMap, b: Body) -> Response<Body> {
+    if m == Method::POST && p == "/v1/hook" {
+        return hook(a, q, b).await;
+    }
     if !tok_ok(a, hd) {
         return er(StatusCode::UNAUTHORIZED, "missing or wrong API token (Settings → API)");
     }
@@ -272,7 +409,7 @@ async fn api(a: &Ax, m: &Method, p: &str, q: &str, b: Value) -> Response<Body> {
         ("GET", "/api/job") => {
             let id: i64 = qv("id").parse().unwrap_or(0);
             match a.db.one("select * from jobs where id=?", pa![id]) {
-                Some(j) => js(json!({"id": j["id"], "repo": j["repo"], "num": j["num"], "kind": j["kind"], "title": j["title"], "url": j["url"], "st": j["st"], "why": j["why"], "pt": j["d"]["pt"], "pb": j["d"]["pb"], "df": j["d"]["df"], "proof": j["d"]["proof"], "known": j["d"]["known"], "h": j["d"]["h"], "ext": j["d"]["ext"]["src"], "ev": a.db.all("select t,w,m from ev where j=? order by id desc limit 80", pa![id])})),
+                Some(j) => js(json!({"id": j["id"], "repo": j["repo"], "num": j["num"], "kind": j["kind"], "title": j["title"], "url": j["url"], "st": j["st"], "why": j["why"], "pt": j["d"]["pt"], "pb": j["d"]["pb"], "df": j["d"]["df"], "proof": j["d"]["proof"], "known": j["d"]["known"], "h": j["d"]["h"], "ext": j["d"]["ext"]["src"], "cost": a.db.one("select sum(case when sub=0 then usd end) usd, sum(case when sub=1 then usd end) val, sum(tin+tcw+tcr) ti, sum(tout) tou, count(*) n from cost where job=?", pa![id]), "ev": a.db.all("select t,w,m from ev where j=? order by id desc limit 80", pa![id])})),
                 None => er(StatusCode::NOT_FOUND, "no such job"),
             }
         }
@@ -358,12 +495,16 @@ async fn api(a: &Ax, m: &Method, p: &str, q: &str, b: Value) -> Response<Body> {
                     js(json!({"full": r, "ci": c, "setup": s, "cfg": cfg(a)}))
                 }
                 "set" => {
-                    for (k, kind) in [("iss", 0), ("hunt", 0), ("nm", 0), ("on_", 0), ("maxo", 1), ("maxd", 1), ("ci", 2), ("setup", 2), ("rules", 2), ("mode", 2)] {
+                    for (k, kind) in [("iss", 0), ("hunt", 0), ("nm", 0), ("on_", 0), ("maxo", 1), ("maxd", 1), ("bud", 3), ("ci", 2), ("setup", 2), ("rules", 2), ("mode", 2)] {
                         let v = &b[k];
                         if v.is_null() {
                             continue;
                         }
                         match kind {
+                            3 => {
+                                let x = v.as_f64().unwrap_or(0.0).clamp(0.0, 100_000.0);
+                                a.db.run(&format!("update rp set {k}=? where full=?"), pa![x, r.clone()]);
+                            }
                             0 => {
                                 let x = v.as_bool().map(|x| x as i64).or(v.as_i64()).unwrap_or(0).clamp(0, 1);
                                 a.db.run(&format!("update rp set {k}=? where full=?"), pa![x, r.clone()]);
@@ -475,6 +616,20 @@ async fn api(a: &Ax, m: &Method, p: &str, q: &str, b: Value) -> Response<Body> {
             if let Some(x) = b["tokday"].as_i64() {
                 s["tokday"] = json!(x.max(0));
             }
+            if let Some(x) = b["budday"].as_f64() {
+                s["budday"] = json!(x.clamp(0.0, 100_000.0));
+            }
+            if let Some(o) = b["px"].as_object() {
+                let mut px = json!({});
+                for (k, v) in o.iter().take(100) {
+                    let k = k.trim().to_lowercase();
+                    let x: Vec<f64> = v.as_array().map(|v| v.iter().filter_map(|x| x.as_f64()).filter(|x| x.is_finite() && *x >= 0.0 && *x < 10_000.0).collect()).unwrap_or_default();
+                    if regex::Regex::new(r"^[a-z0-9._:/-]{1,100}$").unwrap().is_match(&k) && (x.len() == 2 || x.len() == 4) {
+                        px[k] = json!(x);
+                    }
+                }
+                s["px"] = px;
+            }
             for k in ["ntfy", "discord"] {
                 if let Some(x) = b[k].as_str() {
                     let x = x.trim();
@@ -484,6 +639,7 @@ async fn api(a: &Ax, m: &Method, p: &str, q: &str, b: Value) -> Response<Body> {
                 }
             }
             a.db.ks("set", &s);
+            a.tick();
             if b["test"].as_bool().unwrap_or(false) {
                 crate::ntf::send(a, "ApolloOffice", "Test notification", 3).await;
             }
@@ -516,6 +672,21 @@ async fn api(a: &Ax, m: &Method, p: &str, q: &str, b: Value) -> Response<Body> {
                 Err(e) => js(json!({"ok": false, "m": crate::wk::errm(&e)})),
             }
         }
+        ("GET", "/api/cost") => js(costs(a)),
+        ("POST", "/api/hooktok") => match b["op"].as_str().unwrap_or("") {
+            "new" => {
+                let t = hex::encode(rand::random::<[u8; 24]>());
+                a.db.ks("hook", &json!({"h": th(&t), "t0": now()}));
+                a.say("scout", "new error tracker link created", None);
+                js(json!({"ok": true, "tok": t}))
+            }
+            "off" => {
+                a.db.kd("hook");
+                a.say("scout", "error tracker link revoked", None);
+                js(json!({"ok": true}))
+            }
+            _ => er(StatusCode::BAD_REQUEST, "op"),
+        },
         ("POST", "/api/apitok") => match b["op"].as_str().unwrap_or("") {
             "new" => {
                 let t = format!("ao_{}", hex::encode(rand::random::<[u8; 24]>()));
@@ -677,5 +848,55 @@ pub async fn h(State(a): State<Ax>, req: Request<Body>) -> Response<Body> {
     match Ui::get(&f) {
         Some(x) => rs(StatusCode::OK, mime_guess::from_path(&f).first_or_octet_stream().as_ref(), x.data.into_owned()),
         None => er(StatusCode::NOT_FOUND, "not found"),
+    }
+}
+
+#[cfg(test)]
+mod t {
+    use super::*;
+
+    #[test]
+    fn trackers() {
+        let s = json!({"action": "triggered", "data": {"event": {"title": "TypeError: x is undefined", "culprit": "app/main.js in run", "issue_id": "42", "release": "1.2.0", "exception": {"values": [{"type": "TypeError", "value": "x is undefined", "stacktrace": {"frames": [{"function": "lib", "filename": "node_modules/a.js", "lineno": 1, "in_app": false}, {"function": "run", "filename": "app/main.js", "lineno": 7, "in_app": true}]}}]}, "web_url": "https://sentry.io/i/42"}}});
+        let r = trk(&s).unwrap();
+        assert_eq!(r["fp"], "sentry:42");
+        assert_eq!(r["where"], "app/main.js in run");
+        assert!(r["logs"].as_str().unwrap().contains("at run (app/main.js:7)"));
+        assert!(!r["logs"].as_str().unwrap().contains("node_modules"));
+        assert!(r["body"].as_str().unwrap().contains("Release: 1.2.0"));
+        let i = json!({"action": "created", "data": {"issue": {"id": "9", "title": "ZeroDivisionError", "culprit": "calc.py", "permalink": "https://x/9", "metadata": {"type": "ZeroDivisionError", "value": "division by zero", "function": "div", "filename": "calc.py"}}}});
+        let r = trk(&i).unwrap();
+        assert_eq!(r["fp"], "sentry:9");
+        assert!(r["logs"].as_str().unwrap().contains("division by zero"));
+        let g = json!({"text": "GlitchTip Alert", "attachments": [{"title": "KeyError: 'id'", "title_link": "https://gt/issues/5", "text": "views.get", "fields": [{"title": "Project", "value": "web"}]}]});
+        let r = trk(&g).unwrap();
+        assert_eq!(r["src"], "GlitchTip");
+        assert_eq!(r["fp"], "gt:https://gt/issues/5");
+        assert!(trk(&json!({"data": {}})).is_none());
+    }
+
+    #[test]
+    fn hint() {
+        let r = |md: &str, jobs: i64, mg: i64, usd: f64| json!({"repo": "o/r", "w": "fixer", "md": md, "jobs": jobs, "mg": mg, "usd": usd});
+        let h = hints(&[r("anthropic:claude-opus-5-5", 6, 3, 6.0), r("anthropic:claude-sonnet-5-5", 6, 3, 1.5)]);
+        assert_eq!(h.len(), 1);
+        assert!(h[0].contains("Claude Sonnet 5.5") && h[0].contains("4×"), "{}", h[0]);
+        assert!(hints(&[r("anthropic:claude-opus-5-5", 6, 5, 6.0), r("anthropic:claude-sonnet-5-5", 6, 2, 1.5)]).is_empty());
+        assert!(hints(&[r("anthropic:claude-opus-5-5", 6, 3, 6.0), r("anthropic:claude-sonnet-5-5", 4, 3, 1.0)]).is_empty());
+    }
+
+    #[test]
+    fn dedup() {
+        let db = crate::db::Db::mem();
+        db.run("insert into rp(full,on_) values('o/r',1)", pa![]);
+        let a = std::sync::Arc::new(crate::app::App::new(db, std::env::temp_dir(), 1, "x".into()));
+        let b = json!({"repo": "o/r", "title": "t", "body": "b", "fp": "sentry:1"});
+        let x = rep(&a, &b).unwrap();
+        let y = rep(&a, &b).unwrap();
+        assert_eq!(x["id"], y["id"]);
+        assert_eq!(y["new"], false);
+        assert_eq!(a.db.jg(x["id"].as_i64().unwrap()).unwrap().d["ext"]["n"], 2);
+        let z = rep(&a, &json!({"repo": "o/r", "title": "t", "body": "b", "fp": "sentry:2"})).unwrap();
+        assert_ne!(x["id"], z["id"]);
     }
 }

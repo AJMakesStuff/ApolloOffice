@@ -467,6 +467,7 @@
     const cs = (w.cmds || []).length ? w.cmds.slice(-4).reverse() : S.ev.filter((e) => e.w === h.n).slice(0, 3).map((e) => [e.t, e.m]);
     return `<div class="th"><b>${NM[h.n]}</b><span>${esc(mdn(w.md))}</span></div>`
       + tr("status", esc(st) + (w.tk ? ` · ${kt(w.tk)} tok today` : ""))
+      + (w.cs && (w.cs[0] || w.cs[1]) ? tr("cost", [w.cs[0] ? AO.usd(w.cs[0]) + " API" : "", w.cs[1] ? AO.usd(w.cs[1]) + " login value" : ""].filter(Boolean).join(" · ") + " today") : "")
       + (q ? tr("job", `${esc(rn(q))} · ${esc(q.title)} <span class="k">${esc(q.st)}</span>`) : "")
       + (w.say && !h.q ? tr("says", esc(w.say) + ` <span class="k">${ago(w.t)}</span>`) : "")
       + (cs.length ? `<div class="tc">${cs.map(([t, c]) => `<div><span class="k">${ago(t)}</span><span>${esc(c)}</span></div>`).join("")}</div>` : "")

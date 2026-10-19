@@ -20,6 +20,71 @@ pub const PV: &[Pv] = &[
     Pv { id: "ollama", nm: "Ollama (local)", fmt: "ollama", base: "http://127.0.0.1:11434", key: false, ms: &[] },
 ];
 
+pub const PX: &[(&str, f64, f64, f64, f64)] = &[
+    ("claude-fable-5-1", 10.0, 12.5, 0.25, 50.0),
+    ("claude-mythos-5-1", 10.0, 12.5, 0.25, 50.0),
+    ("claude-fable-5", 10.0, 12.5, 1.0, 50.0),
+    ("claude-mythos-5", 10.0, 12.5, 1.0, 50.0),
+    ("claude-opus-5-5", 4.0, 5.0, 0.2, 20.0),
+    ("claude-opus-5", 5.0, 6.25, 0.5, 25.0),
+    ("claude-opus-4-5", 5.0, 6.25, 0.5, 25.0),
+    ("claude-opus-4-6", 5.0, 6.25, 0.5, 25.0),
+    ("claude-opus-4-7", 5.0, 6.25, 0.5, 25.0),
+    ("claude-opus-4-8", 5.0, 6.25, 0.5, 25.0),
+    ("claude-opus-4", 15.0, 18.75, 1.5, 75.0),
+    ("claude-sonnet-5-5", 2.0, 2.5, 0.1, 10.0),
+    ("claude-sonnet-5", 2.0, 2.5, 0.2, 10.0),
+    ("claude-sonnet-4", 3.0, 3.75, 0.3, 15.0),
+    ("claude-haiku-5-5", 0.1, 0.125, 0.01, 0.5),
+    ("claude-haiku-4-5", 1.0, 1.25, 0.1, 5.0),
+    ("claude-3-5-haiku", 0.8, 1.0, 0.08, 4.0),
+    ("gpt-5.6-sol", 4.0, 4.0, 0.4, 20.0),
+    ("gpt-5.6-terra", 2.0, 2.0, 0.2, 12.0),
+    ("gpt-5.6-luna", 0.2, 0.2, 0.02, 1.2),
+    ("gpt-5.5-pro", 30.0, 30.0, 30.0, 180.0),
+    ("gpt-5.5", 5.0, 5.0, 0.5, 30.0),
+    ("gpt-5.4-pro", 30.0, 30.0, 30.0, 180.0),
+    ("gpt-5.4-mini", 0.75, 0.75, 0.075, 4.5),
+    ("gpt-5.4-nano", 0.2, 0.2, 0.02, 1.25),
+    ("gpt-5.4", 2.5, 2.5, 0.25, 15.0),
+    ("gpt-5.3-codex", 1.75, 1.75, 0.175, 14.0),
+    ("gpt-5.2-pro", 21.0, 21.0, 21.0, 168.0),
+    ("gpt-5.2", 1.75, 1.75, 0.175, 14.0),
+    ("gpt-5.1", 1.25, 1.25, 0.125, 10.0),
+    ("gpt-5-pro", 15.0, 15.0, 15.0, 120.0),
+    ("gpt-5-mini", 0.25, 0.25, 0.025, 2.0),
+    ("gpt-5-nano", 0.05, 0.05, 0.005, 0.4),
+    ("gpt-5", 1.25, 1.25, 0.125, 10.0),
+    ("gemini-2.5-pro", 1.25, 1.25, 0.125, 10.0),
+    ("gemini-2.5-flash", 0.3, 0.3, 0.03, 2.5),
+    ("gemini-3-flash", 0.5, 0.5, 0.05, 3.0),
+    ("gemini-3.1-pro", 2.0, 2.0, 0.2, 12.0),
+    ("gemini-3.1-flash-lite", 0.25, 0.25, 0.025, 1.5),
+    ("gemini-3.5-flash-lite", 0.3, 0.3, 0.03, 2.5),
+    ("gemini-3.6-flash", 0.75, 0.75, 0.075, 3.75),
+    ("gemini-3.8-flash", 0.75, 0.75, 0.075, 3.75),
+    ("gemini-4-argon", 2.0, 2.0, 0.1, 10.0),
+];
+
+pub fn px(a: &Ax, md: &str) -> Option<[f64; 4]> {
+    let (p, m) = parse(md);
+    if p == "ollama" {
+        return Some([0.0; 4]);
+    }
+    let m = m.trim_start_matches("models/").to_lowercase();
+    let o = &a.set()["px"];
+    if let Some(v) = o[&m].as_array() {
+        let x: Vec<f64> = v.iter().filter_map(|x| x.as_f64()).collect();
+        if x.len() == 2 {
+            return Some([x[0], x[0], x[0], x[1]]);
+        }
+        if x.len() == 4 {
+            return Some([x[0], x[1], x[2], x[3]]);
+        }
+    }
+    PX.iter().filter(|x| m.starts_with(x.0)).max_by_key(|x| x.0.len()).map(|x| [x.1, x.2, x.3, x.4])
+}
+
 pub fn pv(id: &str) -> Option<&'static Pv> {
     PV.iter().find(|p| p.id == id)
 }
@@ -147,5 +212,10 @@ mod t {
         assert_eq!(name("gemini:gemini-2.5-flash"), "Gemini-2.5-Flash");
         assert_eq!(name("anthropic:claude-sonnet-5-5"), "Claude Sonnet 5.5");
         assert_eq!(mail("codex:gpt-5.5"), "noreply@openai.com");
+        let m = |k: &str| PX.iter().filter(|x| k.starts_with(x.0)).max_by_key(|x| x.0.len()).map(|x| x.0);
+        assert_eq!(m("claude-opus-5-5"), Some("claude-opus-5-5"));
+        assert_eq!(m("claude-opus-4-1-20250805"), Some("claude-opus-4"));
+        assert_eq!(m("gpt-5.4-mini-2026"), Some("gpt-5.4-mini"));
+        assert_eq!(m("gpt-5"), Some("gpt-5"));
     }
 }

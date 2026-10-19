@@ -21,12 +21,16 @@ create table if not exists prs(repo text, num int, st text, title text, url text
 create table if not exists tok(day text, w text, tin int default 0, tout int default 0, primary key(day, w));
 create table if not exists seen(repo text, num int, upd text, primary key(repo, num));
 create table if not exists cm(id text primary key, t int);
+create table if not exists cost(id integer primary key, t int, day text, job int, repo text default '', w text, md text, sub int default 0, tin int default 0, tcw int default 0, tcr int default 0, tout int default 0, usd real);
+create index if not exists cost_day on cost(day);
+create index if not exists cost_job on cost(job);
 ";
 
 fn mig(c: &Connection) {
     let _ = c.execute("alter table rp add column nm int default 1", []);
     let _ = c.execute("alter table hs add column no text default ''", []);
     let _ = c.execute("alter table hs add column cpu int default 0", []);
+    let _ = c.execute("alter table rp add column bud real default 0", []);
 }
 
 pub type P = Vec<Box<dyn ToSql + Send>>;
@@ -132,6 +136,14 @@ impl Db {
 
     pub fn kd(&self, k: &str) {
         self.run("delete from kv where k=?", crate::pa![k.to_string()]);
+    }
+
+    pub fn usd(&self, r: Option<&str>) -> f64 {
+        let v = match r {
+            Some(r) => self.one("select coalesce(sum(usd),0) s from cost where day=? and sub=0 and repo=?", crate::pa![day(), r.to_string()]),
+            None => self.one("select coalesce(sum(usd),0) s from cost where day=? and sub=0", crate::pa![day()]),
+        };
+        v.and_then(|x| x["s"].as_f64()).unwrap_or(0.0)
     }
 
     pub fn jg(&self, id: i64) -> Option<Job> {

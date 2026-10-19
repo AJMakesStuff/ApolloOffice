@@ -149,6 +149,11 @@ input:focus, textarea:focus, select:focus { outline: 1px solid var(--info); bord
 .acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .msg { font: 12px var(--m); margin-top: 8px; color: var(--t2); white-space: pre-wrap; }
 .msg.bad2 { color: var(--bad); }
+.tw { overflow-x: auto; }
+table.tb { width: 100%; border-collapse: collapse; font: 11px/1.4 var(--m); }
+table.tb th { text-align: left; color: var(--t3); font-weight: 400; padding: 3px 6px 5px 0; border-bottom: 1px solid var(--l); white-space: nowrap; }
+table.tb td { padding: 4px 6px 4px 0; border-bottom: 1px solid var(--l); white-space: nowrap; }
+table.tb td.n, table.tb th.n { text-align: right; }
 pre.df { font: 11px/1.45 var(--m); background: var(--g); border: 1px solid var(--l); border-radius: 6px; padding: 8px 10px; overflow: auto; max-height: 46vh; margin: 0; white-space: pre; }
 pre.df .ad { color: var(--ok); } pre.df .rm { color: var(--bad); } pre.df .hh { color: var(--info); } pre.df .fh { color: var(--t1); font-weight: 600; }
 .warn { border: 1px solid color-mix(in srgb, var(--bad) 50%, transparent); color: var(--t1); border-radius: 6px; padding: 8px 10px; font-size: 12px; margin: 8px 0; }
@@ -165,6 +170,7 @@ pre.df .ad { color: var(--ok); } pre.df .rm { color: var(--bad); } pre.df .hh { 
   <span class="chip" id="cHo"></span>
   <span class="chip" id="cQ"></span>
   <span class="sp"></span>
+  <button id="bCost">Costs</button>
   <button id="bRepos">Repos</button>
   <button id="bHosts">Machines</button>
   <button id="bSet" class="ic" title="Settings" aria-label="Settings"></button>
