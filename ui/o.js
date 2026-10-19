@@ -55,7 +55,7 @@
     return "#" + [y, y, y].map((v) => v.toString(16).padStart(2, "0")).join("");
   };
   const dim = (sk) => ({ body: gray(sk.body, 0.6), dark: gray(sk.dark, 0.6), light: gray(sk.light, 0.6) });
-  const LT = { "#0d0e10": "#e4e7ec", "#121317": "#d5dae1", "#1d1f24": "#bcc2cb", "#111215": "#dde1e7", "#0f1013": "#eceef2", "#3d4045": "#9aa1ab", "#4a4d54": "#7d8490", "#2a2c32": "#a9b0ba", "#1c1e22": "#c3c9d1", "#25272c": "#cdd2d9", "#16171a": "#8e95a0", "#141518": "#b0b7c1", "#232529": "#a3aab4", "#26282d": "#b9c0c9", "#75746f": "#7d8490", "#b9bcc2": "#4c515b", "#2a1715": "#e8bfb9" };
+  const LT = { "#3d4045": "#8a94a2", "#4a4d54": "#5a6472", "#75746f": "#8a94a2", "#1d1f24": "#c9d1db" };
   const lt = () => document.documentElement.dataset.th === "light";
   const C = (k) => (lt() && LT[k]) || k;
   const hl = (n) => (lt() ? SK[n].dark : SK[n].light);
@@ -64,7 +64,40 @@
   const tx = (s, x, y, col) => K.text(c, s, x, y, C(col));
   const party = () => S?.lm && S.t - S.lm.t < 180000;
 
-  const floor = () => {
+  const win = (x, y, w, h, t, sd) => {
+    px(x - 1, y - 1, w + 2, h + 2, "#c3ccd7");
+    px(x, y, w, h, "#dcedf8");
+    px(x, y, w, h * 0.6, "#c6e3f6");
+    px(x, y, w, h * 0.3, "#b0d7f1");
+    c.save(); c.beginPath(); c.rect(x, y, w, h); c.clip();
+    for (let k = 0; k < 2; k++) {
+      const cx = x - 14 + ((t * (1.5 + k) + sd * 37 + k * 41) % (w + 28)), cy = y + 4 + k * 8;
+      px(cx, cy, 10, 2, "#ffffff"); px(cx + 2, cy - 2, 5, 2, "#ffffff");
+    }
+    c.restore();
+    if (w > 40) px(x + (w >> 1), y, 1, h, "#c3ccd7");
+    px(x - 3, y + h + 1, w + 6, 2, "#e4e9ef");
+  };
+  const day = (t) => {
+    px(0, 0, VW, VH, "#e9eef3");
+    for (let k = 0, y = 35; y < VH; y += 8, k++) for (let x = k % 2 ? 0 : 8; x < VW; x += 16) px(x, y, 8, 8, "#e2e8ee");
+    c.globalAlpha = 0.55;
+    for (const [x0, w] of [[36, 110], [326, 66]]) for (let y = 35; y < 92; y++) px(x0 + (y - 35) * 0.7, y, w, 1, "#f7fafc");
+    c.globalAlpha = 1;
+    px(0, 0, VW, 34, "#f8f9fb");
+    px(0, 30, VW, 4, "#e6ebf0");
+    px(0, 34, VW, 1, "#c9d1db");
+    win(36, 5, 110, 22, t, 1);
+    win(326, 5, 66, 22, t, 2);
+    px(256, 38, 140, 84, "#f3f5f8");
+    px(256, 38, 140, 1, "#c9d1db");
+    px(256, 38, 1, 84, "#c9d1db");
+    tx("MACHINES", 262, 42, "#8a94a2");
+    px(158, 6, 84, 22, "#0a0b0d");
+    px(158, 6, 84, 1, "#24272d");
+  };
+  const floor = (t) => {
+    if (lt()) return day(t);
     px(0, 0, VW, VH, "#0d0e10");
     px(0, 0, VW, 34, "#121317");
     px(0, 34, VW, 1, "#1d1f24");
@@ -122,6 +155,15 @@
   };
 
   const desk = (x, y, col) => {
+    if (lt()) {
+      px(x - 14, y, 28, 3, "#ffffff");
+      px(x - 14, y + 3, 28, 8, "#dfe5ec");
+      px(x - 14, y + 3, 28, 1, "#cdd5df");
+      px(x - 12, y + 11, 2, 3, "#7d8794");
+      px(x + 10, y + 11, 2, 3, "#7d8794");
+      px(x - 8, y + 6, 16, 1, col);
+      return;
+    }
     px(x - 14, y, 28, 3, "#2a2c32");
     px(x - 14, y + 3, 28, 8, "#1c1e22");
     px(x - 14, y + 3, 28, 1, "#25272c");
@@ -340,7 +382,7 @@
     c.imageSmoothingEnabled = false;
     fc.imageSmoothingEnabled = false;
     hits = [];
-    floor();
+    floor(t);
     board(t);
     radio(292, 9, t);
     plant(248, 112);
