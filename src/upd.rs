@@ -1,6 +1,5 @@
 use crate::app::Ax;
 use crate::db::now;
-use crate::pa;
 use base64::Engine;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde_json::{json, Value};
@@ -107,7 +106,7 @@ pub async fn check(a: &Ax) -> Result<Value, String> {
             x["ready"] = json!(v);
             x["sha"] = json!(want);
         });
-        a.say("submit", &format!("update {v} downloaded, it installs when the office is idle"), None);
+        a.say("submit", &format!("update {v} downloaded, it installs once the running jobs are done"), None);
         Ok(json!({"latest": v, "new": true}))
     }
     .await;
@@ -127,7 +126,7 @@ pub fn ready(a: &Ax) -> bool {
 }
 
 fn idle(a: &Ax) -> bool {
-    a.act.lock().unwrap().is_empty() && a.db.n("select count(*) from jobs where st in ('repro','fix','ci','review','gate','submit','hunt')", pa![]) == 0
+    a.act.lock().unwrap().is_empty() && a.lk.lock().unwrap().is_empty()
 }
 
 pub fn spawn(a: Ax) {
@@ -142,9 +141,14 @@ pub fn spawn(a: Ax) {
             }
             for _ in 0..(6 * 60) {
                 tokio::time::sleep(Duration::from_secs(60)).await;
-                if on(&a) && ready(&a) && writable(&a.me) && idle(&a) {
-                    apply(&a);
-                    return;
+                if on(&a) && ready(&a) && writable(&a.me) {
+                    if !a.drain.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                        a.say("submit", "update ready: finishing running jobs, then restarting", None);
+                    }
+                    if idle(&a) {
+                        apply(&a);
+                        return;
+                    }
                 }
             }
         }

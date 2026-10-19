@@ -73,6 +73,7 @@ pub struct App {
     pub vk: Mutex<Option<[u8; 32]>>,
     pub quit: tokio::sync::Notify,
     pub restart: Mutex<bool>,
+    pub drain: std::sync::atomic::AtomicBool,
     pub oa: Mutex<HashMap<String, (String, String, i64)>>,
 }
 
@@ -166,6 +167,7 @@ impl App {
             vk: Mutex::new(None),
             quit: tokio::sync::Notify::new(),
             restart: Mutex::new(false),
+            drain: std::sync::atomic::AtomicBool::new(false),
             oa: Mutex::new(HashMap::new()),
         }
     }

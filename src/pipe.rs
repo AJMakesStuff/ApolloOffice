@@ -1409,6 +1409,9 @@ async fn red(a: &Ax, r: &str) -> bool {
 }
 
 async fn pick(a: &Ax, h: &str) -> Option<i64> {
+    if a.drain.load(std::sync::atomic::Ordering::Relaxed) {
+        return None;
+    }
     let mut c = a.db.all("select * from jobs where st in ('ready','submit') order by id", pa![]);
     let rk = |j: &Value| -> (i32, i32, f64, i64) {
         let d = &j["d"];
@@ -1513,7 +1516,7 @@ async fn lane(a: Ax, h: String, k: i64) {
             sl(60_000).await;
             continue;
         }
-        while !a.hold("hunter") && mk_hunt(&a) {}
+        while !a.hold("hunter") && !a.drain.load(std::sync::atomic::Ordering::Relaxed) && mk_hunt(&a) {}
         let Some(id) = pick(&a, &h).await else {
             sl(20_000).await;
             continue;
