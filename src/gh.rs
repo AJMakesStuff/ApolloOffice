@@ -75,7 +75,8 @@ pub async fn refs(r: &str, n: i64) -> Result<Vec<Rf>, String> {
 }
 
 pub fn live(x: Vec<Rf>) -> Vec<Rf> {
-    x.into_iter().filter(|p| p.st == "open" || p.st == "merged").collect()
+    let mut seen = std::collections::HashSet::new();
+    x.into_iter().filter(|p| (p.st == "open" || p.st == "merged") && seen.insert((p.rp.clone(), p.n))).collect()
 }
 
 pub async fn twins(a: &App, r: &str, w: &str) -> Result<(Vec<Value>, Vec<Value>), String> {
@@ -177,6 +178,13 @@ pub async fn today(a: &App, r: &str) -> i64 {
 #[cfg(test)]
 mod t {
     use super::*;
+
+    #[test]
+    fn lives() {
+        let r = |n: i64, st: &str| Rf { n, rp: "o/r".into(), st: st.into(), by: "x".into() };
+        let l = live(vec![r(1, "merged"), r(1, "merged"), r(2, "closed"), r(3, "open")]);
+        assert_eq!(l.iter().map(|p| p.n).collect::<Vec<_>>(), vec![1, 3]);
+    }
 
     #[test]
     fn ci() {
