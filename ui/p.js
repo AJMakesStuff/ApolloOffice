@@ -199,7 +199,11 @@
         <div class="hint">Without a token Claude Code uses its own login on this computer.</div>
         <label>Ollama address</label><input type="text" name="ollama" value="${esc(s.prov?.ollama?.base || "")}" placeholder="${esc(ol.dbase)}">
         <label>Ollama context</label><input type="number" name="octx" min="2048" step="1024" value="${s.prov?.ollama?.ctx || 32768}"><div class="hint">Tokens per request. Ollama's default of 4096 is too small for the workers.</div>
-        <div class="hint">Keys are stored encrypted on this computer. Claude Code and Codex use their own CLI logins. Pick a provider per worker with the gear on its card.</div>
+        <div class="hint">Keys are stored encrypted on this computer. Claude Code and Codex use their own CLI logins. Pick a model per worker under Models below.</div>
+      </div></div></div>
+      <div class="sec"><h4>Models</h4><div class="box"><div class="fm" style="margin:0">
+        ${["scout", "guard", "vet", "hunter", "repro", "fixer", "reviewer", "watcher"].map((w) => `<label>${esc(A.NM?.[w] || w)}</label><div class="ck"><span style="flex:1">${RK[w].map(([k, l]) => esc((RK[w].length > 1 ? l + ": " : "") + (A.mdn ? A.mdn(s.md[k]) : s.md[k]))).join(" · ")}</span><button type="button" data-role="${w}">Change</button></div>`).join("")}
+        <div class="hint">Also reachable with the gear on each worker's card.</div>
       </div></div></div>
       <div class="sec"><h4>Sign in</h4><div class="box">${cfg.google ? `<div class="ck"><b class="ok2">Google</b> ${esc(cfg.google)} can sign in.</div><div class="acts"><button type="button" class="dng" id="gu">Disconnect Google</button></div>` : `<div class="ck">Sign in with a one-time link from <code>apollo-office login-link</code>, or connect a Google account.</div><div class="acts"><button type="button" id="gl">Connect Google account</button></div>`}</div></div>
       <div class="sec"><h4>Work</h4><div class="box"><div class="fm" style="margin:0">
@@ -230,6 +234,7 @@
       $("sm").textContent = test ? "Saved and test sent." : "Saved.";
     };
     $("fs").onsubmit = (e) => { e.preventDefault(); send(false); };
+    for (const b of B.querySelectorAll("[data-role]")) b.onclick = () => role(b.dataset.role);
     $("bt").onclick = () => send(true);
     if ($("gl")) $("gl").onclick = async () => { const r = await post({ op: "link" }, "/api/google"); if (r.url) location.href = r.url; };
     if ($("gu")) $("gu").onclick = async (e) => { if (e.target.dataset.sure !== "1") { e.target.dataset.sure = "1"; e.target.textContent = "Click again to disconnect"; return; } await post({ op: "unlink" }, "/api/google"); settings(); };

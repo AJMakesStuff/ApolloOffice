@@ -357,6 +357,7 @@
     const c = m.includes("haiku") ? "Haiku" : m.includes("sonnet") ? "Sonnet" : m.includes("opus") ? "Opus" : m.split("/").pop();
     return p === "ollama" ? c + " · local" : p === "codex" ? c + " · ChatGPT" : p === "anthropic" ? c + " · API" : c;
   };
+  window.AO.mdn = mdn;
   const tiles = () => {
     const el = $("tiles");
     if (!el.children.length) {
