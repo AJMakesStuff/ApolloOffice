@@ -129,7 +129,7 @@ async fn checks(a: &Ax) -> Value {
 }
 
 fn cfg(a: &Ax) -> Value {
-    json!({"repos": a.db.all("select * from rp order by full", pa![]), "hosts": a.db.all("select * from hs order by id='local' desc, id", pa![]), "set": a.set(), "data": a.dd.display().to_string(), "auto": crate::sys::autostart_on(), "prov": crate::prov::status(a), "google": crate::goog::linked(a)["email"], "upd": a.db.kg("upd"), "asset": crate::upd::asset(), "api": {"on": a.db.kg("api")["h"].is_string(), "t0": a.db.kg("api")["t0"], "last": a.db.kg("api")["last"], "port": a.port}, "hook": {"on": a.db.kg("hook")["h"].is_string(), "t0": a.db.kg("hook")["t0"]}})
+    json!({"repos": a.db.all("select * from rp order by full", pa![]), "hosts": a.db.all("select * from hs order by id='local' desc, id", pa![]), "set": a.set(), "data": a.dd.display().to_string(), "auto": crate::sys::autostart_on(&a.dd), "prov": crate::prov::status(a), "google": crate::goog::linked(a)["email"], "upd": a.db.kg("upd"), "asset": crate::upd::asset(), "api": {"on": a.db.kg("api")["h"].is_string(), "t0": a.db.kg("api")["t0"], "last": a.db.kg("api")["last"], "port": a.port}, "hook": {"on": a.db.kg("hook")["h"].is_string(), "t0": a.db.kg("hook")["t0"]}})
 }
 
 fn costs(a: &Ax) -> Value {

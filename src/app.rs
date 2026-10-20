@@ -123,6 +123,10 @@ pub fn ddir(o: Option<PathBuf>) -> PathBuf {
     if let Some(p) = o.or_else(|| std::env::var_os("APOLLO_OFFICE_DATA").map(PathBuf::from)) {
         return p;
     }
+    dd0()
+}
+
+pub fn dd0() -> PathBuf {
     if cfg!(windows) {
         dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")).join("ApolloOffice")
     } else if cfg!(target_os = "macos") {
