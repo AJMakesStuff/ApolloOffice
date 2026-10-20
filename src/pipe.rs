@@ -457,6 +457,16 @@ async fn cirun(a: &Ax, j: &Job, at: Option<&str>) -> (i32, String) {
     (e, o)
 }
 
+fn lost(o: &str) -> bool {
+    !Regex::new(r"\[exit -?\d+\]\s*$").unwrap().is_match(o)
+}
+
+pub fn tool(o: &str) -> Option<(String, Option<String>)> {
+    let l = Regex::new(r"(?im)^.*(?:is required in CI|command not found|no such (?:sub)?command|is not installed|not found in PATH).*$").unwrap().find(o)?.as_str().trim().to_string();
+    let k = Regex::new(r"cargo install ([A-Za-z0-9_-]+)").unwrap().captures(&l).map(|m| m[1].to_string()).or_else(|| Regex::new(r"no such (?:sub)?command:? `?([a-z0-9-]+)`?").unwrap().captures(&l).map(|m| format!("cargo-{}", &m[1])));
+    Some((crate::sh::head(&l, 200), k))
+}
+
 fn errs(o: &str) -> String {
     let re = Regex::new(r"(?i)^(error|failures:|test result: FAILED|---- |FAILED|FAIL|✕|×|E  )|panicked at|AssertionError|Diff in").unwrap();
     let h: Vec<&str> = o.lines().filter(|l| re.is_match(l)).take(60).collect();
@@ -478,6 +488,7 @@ async fn ci0(a: &Ax, j: &mut Job) -> R<String> {
     let c = rp(a, &j.repo)["ci"].as_str().unwrap_or("").to_string();
     j.d["known"] = json!([]);
     let mut ie = 0;
+    let mut it = false;
     loop {
         a.say("ci", &format!("{c} running for {}", j.tag()), Some(j.id));
         let t0 = now();
@@ -493,15 +504,33 @@ async fn ci0(a: &Ax, j: &mut Job) -> R<String> {
             return Ok(format!("CI aborted after {} min (timeout)", CIT / 60));
         }
         a.say("ci", &format!("red (exit {ec}) after {m} min"), Some(j.id));
-        if let Some(m) = Regex::new(r"No space left on device|failed to unpack package|invalid gzip header|corrupt deflate stream|failed to download from|ECONNRESET|ETIMEDOUT|Could not resolve host|EAI_AGAIN").unwrap().find(&o) {
+        let inf = if lost(&o) { Some("connection lost".to_string()) } else { Regex::new(r"No space left on device|failed to unpack package|invalid gzip header|corrupt deflate stream|failed to download from|ECONNRESET|ETIMEDOUT|Could not resolve host|EAI_AGAIN").unwrap().find(&o).map(|m| m.as_str().to_string()) };
+        if let Some(m) = inf {
             if ie < 2 {
                 ie += 1;
-                a.say("ci", &format!("infra error on {} ({}), restarting CI ({ie}/2)", j.h(), m.as_str()), Some(j.id));
+                a.say("ci", &format!("infra error on {} ({m}), restarting CI ({ie}/2)", j.h()), Some(j.id));
                 sl(30_000).await;
                 continue;
             }
+            if lost(&o) {
+                return Err(X::Back(format!("lost the connection to {} during CI", j.h())));
+            }
         }
         let fs = fails(&o);
+        if fs.is_empty() {
+            if let Some(t) = tool(&o) {
+                if let Some(k) = t.1.filter(|_| !it) {
+                    it = true;
+                    a.say("ci", &format!("[{}] {c} needs {k}, installing it", j.h()), Some(j.id));
+                    let r = hx(a, &j.h(), &format!("{}cargo install {} --locked 2>&1 | tail -3", crate::sh::PRE, q(&k)), 2400).await;
+                    if r.c == 0 {
+                        continue;
+                    }
+                }
+                a.st("ci", "idle", None, "sad");
+                return drop(format!("`{c}` needs a tool that is missing on {}: {}", j.h(), t.0));
+            }
+        }
         let bk = format!("cibase:{}", j.repo);
         let bs = j.s("base");
         let cb = a.db.kg(&bk);
@@ -511,6 +540,9 @@ async fn ci0(a: &Ax, j: &mut Job) -> R<String> {
             a.say("ci", &format!("checking whether CI is also red on {} without the fix", j.s("mn")), Some(j.id));
             let (be, bo) = cirun(a, j, Some(&bs)).await;
             ok(a, j, &format!("git checkout -q {}", q(&j.s("br"))), 120).await?;
+            if lost(&bo) {
+                return Err(X::Back(format!("lost the connection to {} while checking {}", j.h(), j.s("mn"))));
+            }
             let bn = fails(&bo);
             a.db.ks(&bk, &json!({"sha": bs, "red": be != 0, "n": bn, "t": now()}));
             (be != 0, bn)
@@ -1622,6 +1654,17 @@ mod t {
         assert_eq!(bare("a::b::c"), "c");
         assert_eq!(bare("tests/t.py::test_x"), "test_x");
         assert_eq!(bare("TestFoo"), "TestFoo");
+    }
+
+    #[test]
+    fn infra() {
+        let o = "CI: 6 passed, FAILED at `deny`: cargo-deny is required in CI: cargo install cargo-deny --locked\nxtask ci: error: ci failed at `deny`\n[exit 1]";
+        assert!(!lost(o));
+        assert!(lost("Compiling foo\n"));
+        assert_eq!(tool(o).unwrap().1.as_deref(), Some("cargo-deny"));
+        assert_eq!(tool("error: no such command: `nextest`\n[exit 101]").unwrap().1.as_deref(), Some("cargo-nextest"));
+        assert_eq!(tool("sh: 1: pnpm: command not found\n[exit 127]").unwrap().1, None);
+        assert!(tool("test a ... FAILED\n[exit 101]").is_none());
     }
 
     #[test]
