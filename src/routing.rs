@@ -72,6 +72,34 @@ pub fn lesson(a: &Ax, job: i64, reviewer: &str, finding: &Value, evidence: &str,
     a.db.ks(&format!("lesson:{job}:{id}"), &record);
 }
 
+/// Normalize provenance before a chat model summarizes it. A route's feedback
+/// belongs to the preceding attempt, never to the model receiving that feedback.
+pub fn evidence_summary(rows: &[Value], detail: &Value, state: &str) -> Value {
+    let mut attempts=Vec::new();
+    let mut author=Value::Null;
+    let accepted=matches!(state,"approve"|"done") && detail["last_review"]["verdict"]["ok"]==true
+        && detail["proof"]["b_exit"]==0;
+    for role in ["guard","vet","repro","fixer","reviewer"] {
+        let mut group=rows.iter().filter(|r|r["role"]==role).collect::<Vec<_>>();
+        group.sort_by_key(|r|r["attempt"].as_u64().unwrap_or(0));
+        for (i,row) in group.iter().enumerate() {
+            let failure=group.get(i+1).and_then(|r|r["feedback"].as_str()).filter(|s|!s.is_empty());
+            let outcome=if failure.is_some() {"failed_or_rejected"}
+                else if role=="fixer" && accepted {author=row["model"].clone();"accepted_candidate"}
+                else {"last_recorded_attempt"};
+            attempts.push(json!({"role":role,"attempt":row["attempt"],"model":row["model"],
+                "outcome":outcome,"failure_diagnostic":failure}));
+        }
+    }
+    json!({"accepted_code_author":author,"reviewer":detail["last_review"]["model"],
+        "attempts":attempts,"regression_test_names":detail["f"]["tests"],
+        "regression_test_count":detail["f"]["tests"].as_array().map(Vec::len),
+        "independent_check_count":detail["acceptance_proof"]["checks"].as_array().map(Vec::len),
+        "ci_evidence":detail["ci_evidence"],
+        "inventory_scope":"requirements.tools is the worker system inventory, not the active project test runtime",
+        "missing_evidence":"null means not recorded; do not infer a runtime or test total from inventory, diff examples or named acceptance checks"})
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -109,6 +137,23 @@ mod tests {
         a.db.ks("set", &json!({"free_first":true,"prov":{"opencode":{"base":"https://external.invalid"}}}));
         assert!(validate(&a,OPENCODE[0]).is_err());
     }
+    #[test]
+    fn reporting_attributes_previous_failure_and_keeps_test_counts_distinct() {
+        let rows=vec![json!({"role":"fixer","attempt":1,"model":OPENCODE[0],"feedback":""}),
+            json!({"role":"fixer","attempt":2,"model":FREE[0],"feedback":"step limit"}),
+            json!({"role":"fixer","attempt":3,"model":"codex:","feedback":"HTTP 404"})];
+        let detail=json!({"last_review":{"model":"codex:","verdict":{"ok":true}},"proof":{"b_exit":0},
+            "f":{"tests":["one_regression_with_many_cases"]},"acceptance_proof":{"checks":["offset","window"]}});
+        let report=evidence_summary(&rows,&detail,"approve");
+        assert_eq!(report["accepted_code_author"],"codex:");
+        assert_eq!(report["attempts"][0]["failure_diagnostic"],"step limit");
+        assert_eq!(report["attempts"][1]["failure_diagnostic"],"HTTP 404");
+        assert!(report["attempts"][2]["failure_diagnostic"].is_null());
+        assert_eq!(report["regression_test_count"],1);assert_eq!(report["independent_check_count"],2);
+        assert!(report["ci_evidence"].is_null());
+        assert!(evidence_summary(&rows,&detail,"fix")["accepted_code_author"].is_null());
+    }
+
     #[test]
     fn rejection_stages_attributed_lesson_only() {
         let a=app();

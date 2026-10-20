@@ -94,3 +94,16 @@ python3 -m unittest discover -s adapters/opencode -p 'test_*.py'
 Tests include real subprocess red/green verification, bounded planner repair,
 provider-limit separation, tool-intent mapping, history preservation and refusal
 of stale or paid models. Unit doubles are not live provider success evidence.
+
+## Interpreting execution evidence
+
+`evidence_summary` attributes a failure to the model that produced it. The raw
+routing entry's `feedback` is input for the next attempt and describes its
+predecessor. An accepted code author is reported only after successful regression
+proof and review; intermediate attempts remain identified separately.
+
+Regression test names, independent acceptance checks and full-suite totals are
+different quantities. New CI runs retain their actual command, candidate, exit
+status and output tail; reruns replace stale CI evidence. Historical runs without
+that record report null. Worker system tool inventory does not establish the
+active project Python version. Missing evidence must remain unknown.

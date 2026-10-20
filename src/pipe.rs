@@ -509,6 +509,8 @@ async fn ci0(a: &Ax, j: &mut Job) -> R<String> {
         a.say("ci", &format!("{c} running for {}", j.tag()), Some(j.id));
         let t0 = now();
         let (ec, o) = cirun(a, j, None).await;
+        j.d["ci_evidence"]=json!({"command":c,"exit":ec,"output_tail":crate::sh::last(&o,4000),"candidate":j.d["proof"]["fix_commit"]});
+        a.db.jd(j);
         let m = (now() - t0) / 60000;
         if ec == 0 {
             a.st("ci", "idle", None, "ok");
@@ -567,6 +569,8 @@ async fn ci0(a: &Ax, j: &mut Job) -> R<String> {
             {
                 a.say("ci", "default branch is green, rerunning once to rule out flaky tests", Some(j.id));
                 let (e2, o2) = cirun(a, j, None).await;
+                j.d["ci_evidence"]=json!({"command":c,"exit":e2,"output_tail":crate::sh::last(&o2,4000),"candidate":j.d["proof"]["fix_commit"],"rerun":true});
+                a.db.jd(j);
                 if e2 == 0 {
                     a.st("ci", "idle", None, "ok");
                     a.say("ci", "green on rerun (flaky test)", Some(j.id));
