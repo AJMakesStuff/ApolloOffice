@@ -456,7 +456,14 @@ fn rep(a: &Ax, b: &Value) -> Result<Value, (StatusCode, String)> {
     Ok(json!({"id": id, "new": true}))
 }
 
-fn repst(a: &Ax, id: i64) -> Option<Value> {
+// Report tokens may submit reports but do not grant private source/review access.
+fn repst(a: &Ax,id:i64)->Option<Value> {
+    let mut j=a.db.one("select id,repo,num,st,why,pr,t0,t1,json_extract(d,'$.acceptance_proof.ok') acceptance_ok from jobs where id=? and json_extract(d,'$.api')=1",pa![id])?;
+    j["routing_models"]=json!(a.db.all("select distinct json_extract(v,'$.model') model from kv where k like ? limit 32",pa![format!("routing:{id}:%")]).iter().filter_map(|r|r["model"].as_str().map(str::to_string)).collect::<Vec<_>>());
+    Some(j)
+}
+
+fn repdetail(a: &Ax, id: i64) -> Option<Value> {
     let j = a.db.one("select id,repo,num,st,why,pr,t0,t1 from jobs where id=? and json_extract(d,'$.api')=1", pa![id])?;
     let pu = j["pr"].as_i64().map(|n| format!("https://github.com/{}/pull/{n}", j["repo"].as_str().unwrap_or("")));
     let detail = a.db.jg(id).map(|j| j.d).unwrap_or(Value::Null);
@@ -615,6 +622,9 @@ async fn api(a: &Ax, m: &Method, p: &str, q: &str, b: Value) -> Response<Body> {
         ("GET", "/api/state") => js(state(a)),
         ("GET", "/api/cfg") => js(cfg(a)),
         ("GET", "/api/check") => js(checks(a).await),
+        ("GET", "/api/report") => match repdetail(a,qv("id").parse().unwrap_or(0)) {
+            Some(value)=>js(value),None=>er(StatusCode::NOT_FOUND,"no report with this id"),
+        },
         ("GET", "/api/job") => {
             let id: i64 = qv("id").parse().unwrap_or(0);
             match a.db.one("select * from jobs where id=?", pa![id]) {
@@ -1050,6 +1060,17 @@ pub async fn h(State(a): State<Ax>, req: Request<Body>) -> Response<Body> {
 #[cfg(test)]
 mod t {
     use super::*;
+
+    #[test]
+    fn report_token_summary_does_not_expose_private_patch_or_review() {
+        let db=crate::db::Db::mem();
+        let id=db.jnew("o/private",0,"fix","bug","","approve","",json!({"api":1,"df":"PRIVATE_PATCH","proof":{"secret":"PRIVATE_PROOF"},"acceptance_proof":{"ok":true},"last_review":{"verdict":{"ok":true}}}),None,0.0);
+        let a=std::sync::Arc::new(crate::app::App::new(db,std::env::temp_dir(),1,"x".into()));
+        let public=repst(&a,id).unwrap();assert_eq!(public["st"],"approve");
+        assert!(!public.to_string().contains("PRIVATE_"));
+        for field in ["diff","proof","result","review","lessons","routing","evidence_summary"] {assert!(public.get(field).is_none());}
+        assert_eq!(repdetail(&a,id).unwrap()["diff"],"PRIVATE_PATCH");
+    }
 
     #[test]
     fn trackers() {

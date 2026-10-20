@@ -54,7 +54,7 @@ pub fn validate(a: &Ax, md: &str) -> R<()> {
 // Independent records avoid overwriting a pipeline Job snapshot during async work.
 pub fn event(a: &Ax, job: Option<i64>, role: &str, attempt: usize, md: &str, feedback: &str) {
     if !enabled(a) { return; }
-    let key = format!("routing:{}:{role}:{attempt}", job.unwrap_or(0));
+    let key = format!("routing:{}:{role}:{attempt}:{}", job.unwrap_or(0),hex::encode(rand::random::<[u8;16]>()));
     a.db.ks(&key, &json!({"job":job,"role":role,"attempt":attempt + 1,"model":md,
         "t":crate::db::now(),"feedback":crate::sh::head(feedback,6000),
         "subscription_repair": role != "reviewer" && REVIEWERS.contains(&md)}));
@@ -81,11 +81,11 @@ pub fn evidence_summary(rows: &[Value], detail: &Value, state: &str) -> Value {
         && detail["proof"]["b_exit"]==0;
     for role in ["guard","vet","repro","fixer","reviewer"] {
         let mut group=rows.iter().filter(|r|r["role"]==role).collect::<Vec<_>>();
-        group.sort_by_key(|r|r["attempt"].as_u64().unwrap_or(0));
+        group.sort_by_key(|r|(r["t"].as_i64().unwrap_or(0),r["attempt"].as_u64().unwrap_or(0)));
         for (i,row) in group.iter().enumerate() {
-            let failure=group.get(i+1).and_then(|r|r["feedback"].as_str()).filter(|s|!s.is_empty());
+            let failure=group.get(i+1).and_then(|r|r["feedback"].as_str()).filter(|s|!s.is_empty() && *s!="read-only independent review; author repairs first");
             let outcome=if failure.is_some() {"failed_or_rejected"}
-                else if role=="fixer" && accepted {author=row["model"].clone();"accepted_candidate"}
+                else if role=="fixer" && i+1==group.len() && accepted {author=row["model"].clone();"accepted_candidate"}
                 else {"last_recorded_attempt"};
             attempts.push(json!({"role":role,"attempt":row["attempt"],"model":row["model"],
                 "outcome":outcome,"failure_diagnostic":failure}));
@@ -108,6 +108,24 @@ mod tests {
         db.ks("set", &json!({"free_first":true,"md":{"big":"openai:paid","fixer":"cc:sonnet"}}));
         std::sync::Arc::new(crate::app::App::new(db, std::env::temp_dir(), 1, "apollo-office".into()))
     }
+    #[test]
+    fn reviewer_failure_diagnostic_is_evidence_not_generic_instructions() {
+        let rows=vec![json!({"role":"reviewer","attempt":1,"model":"codex:","feedback":""}),
+            json!({"role":"reviewer","attempt":2,"model":"cc:sonnet","feedback":"Reviewer codex: failed: request timed out"})];
+        let report=evidence_summary(&rows,&json!({}),"review");
+        assert_eq!(report["attempts"][0]["failure_diagnostic"],"Reviewer codex: failed: request timed out");
+        assert_eq!(report["attempts"][0]["outcome"],"failed_or_rejected");
+        let mut legacy=rows;legacy[1]["feedback"]=json!("read-only independent review; author repairs first");
+        assert!(evidence_summary(&legacy,&json!({}),"review")["attempts"][0]["failure_diagnostic"].is_null());
+    }
+
+    #[test]
+    fn repeated_attempts_keep_separate_provenance_records() {
+        let a=app();event(&a,Some(42),"reviewer",0,"codex:","first");
+        event(&a,Some(42),"reviewer",0,"codex:","second");
+        assert_eq!(a.db.n("select count(*) from kv where k like 'routing:42:reviewer:0:%'",crate::pa![]),2);
+    }
+
     #[test]
     fn author_free_even_for_complex_work_and_paid_config() {
         let a=app();

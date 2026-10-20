@@ -269,7 +269,7 @@ async fn cc(a: &Ax, o: Ask) -> R<(String, Value)> {
             return Err(e);
         }
     }
-    let r = run(&tool("claude"), &av, Rq { i: Some(o.p.clone()), t: o.t, env, rm, cwd: Some(e0), ln: Some(&ln), keep: false }).await;
+    let r = run(&tool("claude"), &av, Rq { i: Some(o.p.clone()), t: o.t, env, rm, cwd: Some(e0), ln: Some(&ln), keep: false, strip_provider_secrets: crate::routing::enabled(a) }).await;
     if !tk.is_empty() {
         a.runs.lock().unwrap().remove(&tk);
     }
@@ -367,7 +367,7 @@ async fn codex(a: &Ax, o: Ask) -> R<(String, Value)> {
             _ => {}
         }
     };
-    let r = run(&tool("codex"), &av, Rq { i: Some(format!("{}\n\n---\n\n{}", o.sys, o.p)), t: o.t, cwd: Some(rd.clone()), ln: Some(&ln), ..Default::default() }).await;
+    let r = run(&tool("codex"), &av, Rq { i: Some(format!("{}\n\n---\n\n{}", o.sys, o.p)), t: o.t, strip_provider_secrets: crate::routing::enabled(a), cwd: Some(rd.clone()), ln: Some(&ln), ..Default::default() }).await;
     if !tk.is_empty() {
         a.runs.lock().unwrap().remove(&tk);
     }
@@ -435,9 +435,9 @@ fn unthink(t: &str) -> String {
 // Preserve the tool-call/result protocol and latest observation while reducing
 // old observations. The code lives on the worker and can be read again by range.
 fn compact_tool_history(messages: &mut [Value]) {
-    let latest=messages.iter().rposition(|m|m["role"]=="tool");
+    let latest=messages.iter().rposition(|m|m["role"]=="assistant");
     for (index,message) in messages.iter_mut().enumerate() {
-        if message["role"]=="tool" && Some(index)!=latest {
+        if message["role"]=="tool" && latest.map(|at|index<at).unwrap_or(false) {
             if let Some(text)=message["content"].as_str() {
                 if text.len()>1024 { message["content"]=json!(format!("{}\n[Older output truncated; read targeted file ranges if needed.]",crate::sh::head(text,1024))); }
             }
@@ -641,9 +641,11 @@ mod t {
     #[test]
     fn tool_history_compaction_preserves_call_ids_and_latest_result() {
         let mut messages=vec![json!({"role":"assistant","tool_calls":[{"id":"call1","function":{"name":"read","arguments":"{}"}}]}),json!({"role":"tool","tool_call_id":"call1","content":"x".repeat(40_000)}),json!({"role":"tool","tool_call_id":"call2","content":"latest".repeat(2000)})];
-        let latest=messages[2].clone();let call=messages[0].clone();
-        compact_tool_history(&mut messages);
-        assert_eq!(messages[0],call);assert_eq!(messages[2],latest);
+        let recent=messages.clone();compact_tool_history(&mut messages);assert_eq!(messages,recent);
+        messages.push(json!({"role":"assistant","tool_calls":[{"id":"call3"}]}));
+        messages.push(json!({"role":"tool","tool_call_id":"call3","content":"z".repeat(40_000)}));
+        let latest=messages[4].clone();let call=messages[0].clone();compact_tool_history(&mut messages);
+        assert_eq!(messages[0],call);assert_eq!(messages[4],latest);
         assert_eq!(messages[1]["tool_call_id"],"call1");assert!(messages[1]["content"].as_str().unwrap().len()<1200);
     }
 

@@ -178,8 +178,8 @@ class ControllerResponseError(ValueError):
 
 def shell_observed(messages):
     completed = {m.get('tool_call_id') for m in messages if m.get('role') == 'tool'}
-    return any(call.get('id') in completed and call.get('function', {}).get('name') == 'apollo_sh'
-               for m in messages if m.get('role') == 'assistant' for call in m.get('tool_calls', []))
+    return any(call.get('id') in completed and isinstance(call.get('function') or {}, dict) and (call.get('function') or {}).get('name') == 'apollo_sh'
+               for m in messages if m.get('role') == 'assistant' for call in (m.get('tool_calls') or []) if isinstance(call, dict))
 
 
 def failed_controller_envelope(msg):

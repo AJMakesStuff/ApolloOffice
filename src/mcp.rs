@@ -34,7 +34,7 @@ pub fn defs() -> Vec<(&'static str, &'static str, Value)> {
         ("edit", "Replace an exact string in a file. old must match exactly once unless all=true.", json!({"type": "object", "properties": {"path": {"type": "string"}, "old": {"type": "string"}, "new": {"type": "string"}, "all": {"type": "boolean"}}, "required": ["path", "old", "new"]})),
         ("grep", "Search tracked files with git grep -n -E. Optional path or glob to narrow.", json!({"type": "object", "properties": {"pattern": {"type": "string"}, "path": {"type": "string"}}, "required": ["pattern"]})),
         ("ls", "List a directory in the repo.", json!({"type": "object", "properties": {"path": {"type": "string"}}})),
-        ("sh", "Run a shell command (bash) in the repo root on the build machine. For builds, tests and git (no push). Output is truncated to the last 30000 chars. Default timeout 20 min, max 60.", json!({"type": "object", "properties": {"cmd": {"type": "string"}, "min": {"type": "number"}}, "required": ["cmd"]})),
+        ("sh", "Run a shell command (bash) in the repo root on the build machine. For builds, tests and git (no push). Output is truncated to the last 30000 chars. Default timeout 20 min, max 60; free-first model commands are capped at 3 min.", json!({"type": "object", "properties": {"cmd": {"type": "string"}, "min": {"type": "number"}}, "required": ["cmd"]})),
     ]
 }
 
@@ -96,6 +96,7 @@ pub async fn call(a: &Ax, r: &Rn, n: &str, g: &Value) -> Result<String, String> 
                 return Err("command not allowed here".into());
             }
             let m = g["min"].as_u64().unwrap_or(20).clamp(1, 60);
+            let m=if crate::routing::enabled(a) {m.min(3)} else {m};
             // The controller already prepared this project environment. Make it
             // the default for model commands too, including commands that cd
             // into a subdirectory. Never source repository activation scripts.

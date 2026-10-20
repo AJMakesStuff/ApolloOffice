@@ -107,3 +107,16 @@ different quantities. New CI runs retain their actual command, candidate, exit
 status and output tail; reruns replace stale CI evidence. Historical runs without
 that record report null. Worker system tool inventory does not establish the
 active project Python version. Missing evidence must remain unknown.
+
+Report API tokens receive status, acceptance status and model names only. Full
+private diffs and execution records require the existing owner session at
+`GET /api/report?id=...`; `GET /v1/reports` does not enumerate these artifacts.
+
+Free-first model shell calls are limited to three minutes. CI and repository
+setup retain their own requested timeouts within the overall job deadline.
+GNU coreutils timeout is used on compatible workers; other platforms retain the
+controller process watchdog. CI capacity is released when work is cancelled.
+Diagnosis review is best effort, cannot approve an already rejected candidate,
+and cannot promote a lesson. Missing or duplicate verifier result markers are
+infrastructure errors; behavioral or candidate compilation failures remain
+repair feedback.

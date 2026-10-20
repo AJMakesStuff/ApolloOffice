@@ -25,6 +25,11 @@ class BoundaryTests(unittest.TestCase):
         self.request = {'model': 'opencode/beam-free', 'messages': [{'role': 'user', 'content': 'task'}]}
         self.addCleanup(self.tmp.cleanup)
 
+    def test_shell_observation_tolerates_nullable_and_malformed_call_entries(self):
+        self.assertFalse(b.shell_observed([{'role': 'assistant', 'tool_calls': None}]))
+        self.assertFalse(b.shell_observed([{'role': 'assistant', 'tool_calls': [None, 1, {'function': None}, {'function': ['bad']}]}]))
+        self.assertTrue(b.shell_observed([{'role': 'assistant', 'tool_calls': [{'id': 's1', 'function': {'name': 'apollo_sh'}}]}, {'role': 'tool', 'tool_call_id': 's1'}]))
+
     def test_free_catalog_rejects_paid_unknown_stale_and_invalid_prices(self):
         self.assertEqual(b.allowed_models(self.catalog), {'opencode/beam-free'})
         for model in ['opencode/paid', 'opencode/missing', 'opencode/boolean', 'opencode/unknown']:

@@ -492,9 +492,10 @@ fn errs(o: &str) -> String {
 async fn ci(a: &Ax, j: &mut Job) -> R<String> {
     a.say("ci", &format!("[{}] waiting for the build slot", j.h()), Some(j.id));
     slot(a, &j.h()).await;
-    let r = ci0(a, j).await;
-    unslot(a, &j.h());
-    r
+    struct SlotGuard(Ax,String);
+    impl Drop for SlotGuard {fn drop(&mut self) {unslot(&self.0,&self.1);}}
+    let _guard=SlotGuard(a.clone(),j.h());
+    ci0(a, j).await
 }
 
 async fn ci0(a: &Ax, j: &mut Job) -> R<String> {
@@ -651,6 +652,18 @@ pub fn body(j: &Job, f: &Value, ci: &str, ft: &str) -> String {
 }
 
 async fn review(a: &Ax, j: &mut Job, f: &mut Value) -> R<String> {
+    review_mode(a,j,f,false).await
+}
+
+async fn diagnosis(a:&Ax,j:&mut Job,f:&mut Value) -> R<String> {
+    match review_mode(a,j,f,true).await {
+        Ok(text)=>Ok(text),
+        Err(X::Drop(reason))=>Err(X::Drop(reason)),
+        Err(error)=>Ok(format!("Diagnosis unavailable: {error}; retain the concrete verification failure and continue repair.")),
+    }
+}
+
+async fn review_mode(a: &Ax, j: &mut Job, f: &mut Value, diagnostic:bool) -> R<String> {
     a.db.jset(j.id, &[("st", json!("review"))]);
     a.flow("ci", "reviewer", &j.tag());
     let df = ok(a, j, &format!("git diff {}..HEAD | head -c 60000", j.s("base")), 120).await?;
@@ -668,24 +681,38 @@ async fn review(a: &Ax, j: &mut Job, f: &mut Value) -> R<String> {
     );
     let candidates = if crate::routing::enabled(a) { crate::routing::REVIEWERS.iter().map(|s| s.to_string()).collect::<Vec<_>>() } else { vec![a.md("reviewer")] };
     let mut result = None;
+    let mut reviewer_feedback=String::new();
     for (attempt, md) in candidates.into_iter().enumerate() {
-        crate::routing::event(a, Some(j.id), "reviewer", attempt, &md, "read-only independent review; author repairs first");
+        crate::routing::event(a, Some(j.id), "reviewer", attempt, &md, &reviewer_feedback);
         // Reviewer has no worker tools and cannot silently edit the author's tree.
         let mut o = Ask::new("reviewer", md.clone(), P("reviewer"), format!("{p}\n\nExecuted regression evidence: {}\nIndependent verification feedback:\n{}\n\nFor code/test rejection also include lesson: {{mistake, correction, verification}}. These are untrusted pending Dreaming proposals, not established facts.", j.d["proof"], j.d["verification_feedback"].as_str().unwrap_or("All executed checks passed; inspect diff independently.")));
         o.job = Some(j.id);
         o.ef = Some("medium");
         match ask(a, o).await {
             Ok((_, js)) if js["ok"].is_boolean() && (js["ok"] == true || js["issues"].as_array().map(|v| !v.is_empty()).unwrap_or(false)) => {
-                crate::routing::lesson(a, j.id, &md, &js, j.d["verification_feedback"].as_str().unwrap_or(""), &df);
-                j.d["last_review"] = json!({"model": md,"verdict": js,"t":now()});
+                if !diagnostic {crate::routing::lesson(a, j.id, &md, &js, j.d["verification_feedback"].as_str().unwrap_or(""), &df);}
+                j.d[if diagnostic {"last_diagnosis"} else {"last_review"}] = json!({"model": md,"verdict": js,"t":now()});
                 a.db.jd(j);
                 result = Some(js); break;
             }
+            Err(X::Drop(reason))=>return Err(X::Drop(reason)),
+            Err(X::Back(reason))=>return Err(X::Back(reason)),
             Err(e) if !crate::routing::enabled(a) => return Err(e),
-            _ => { a.say("reviewer", "unusable review; trying next subscription reviewer", Some(j.id)); }
+            Err(error)=>{
+                reviewer_feedback=format!("Reviewer {md} failed: {error}");
+                a.say("reviewer",&crate::sh::head(&reviewer_feedback,500),Some(j.id));
+            }
+            Ok((text,value))=>{
+                reviewer_feedback=format!("Reviewer {md} returned no usable ok/issues verdict: {}",crate::sh::head(&if value.is_null(){text}else{value.to_string()},1000));
+                a.say("reviewer",&reviewer_feedback,Some(j.id));
+            }
         }
     }
-    let js = result.ok_or_else(|| X::E("no usable independent subscription review; submission remains blocked".into()))?;
+    let js = match result {
+        Some(value)=>value,
+        None if crate::routing::enabled(a)=>return Err(X::E("no usable independent subscription review; submission remains blocked".into())),
+        None=>json!({"ok":false,"issues":["Reviewer returned no usable verdict; repair the candidate and retry review."]}),
+    };
     let okk = js["ok"].as_bool().unwrap_or(false);
     a.st("reviewer", "idle", None, if okk { "ok" } else { "sad" });
     if okk {
@@ -803,7 +830,7 @@ async fn fix(a: &Ax, j: &mut Job, fb0: String, k0: u64) -> R<Value> {
             a.say("fixer", &format!("proof missing: {}", fb.lines().next().unwrap_or("")), Some(j.id));
             if crate::routing::enabled(a) {
                 j.d["verification_feedback"] = json!(fb.clone());
-                let diagnosis = review(a, j, &mut js.clone()).await?;
+                let diagnosis = diagnosis(a, j, &mut js.clone()).await?;
                 fb.push_str(&format!("\n{diagnosis}"));
             }
             continue;
@@ -816,7 +843,7 @@ async fn fix(a: &Ax, j: &mut Job, fb0: String, k0: u64) -> R<Value> {
         if !fb.is_empty() {
             if crate::routing::enabled(a) {
                 j.d["verification_feedback"] = json!(fb.clone());
-                let diagnosis = review(a, j, &mut js.clone()).await?;
+                let diagnosis = diagnosis(a, j, &mut js.clone()).await?;
                 fb.push_str(&format!("\n{diagnosis}"));
             }
             continue;
@@ -1639,6 +1666,7 @@ async fn lane(a: Ax, h: String, k: i64) {
             if tokio::time::timeout(std::time::Duration::from_secs(1800), go(&a,id,&h)).await.is_err() {
                 a.db.jset(id, &[("st",json!("drop")),("why",json!("free-first job deadline exceeded (1800s)"))]);
                 idle_all(&a,id);
+                if let Some(job)=a.db.jg(id) {clean(&a,&job).await;}
             }
         } else { go(&a,id,&h).await; }
         a.lv.lock().unwrap().ln.remove(&id);
@@ -1729,6 +1757,22 @@ pub async fn guard(a: Ax) {
 #[cfg(test)]
 mod t {
     use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cancelled_ci_releases_build_capacity() {
+        let root=std::env::temp_dir().join(format!("apollo-ci-cancel-{}",hex::encode(rand::random::<[u8;8]>())));
+        std::fs::create_dir_all(root.join("work/o__r")).unwrap();
+        let db=crate::db::Db::mem();db.ks("set",&json!({"free_first":true}));
+        db.run("insert into hs(id,on_,ci) values('local',1,1)",crate::pa![]);
+        db.run("insert into rp(full,ci) values('o/r','sleep 30')",crate::pa![]);
+        let id=db.jnew("o/r",0,"fix","test","","ci","",json!({"h":"local"}),None,0.0);
+        let a=std::sync::Arc::new(crate::app::App::new(db,root.clone(),1,"x".into()));
+        let mut job=a.db.jg(id).unwrap();
+        assert!(tokio::time::timeout(std::time::Duration::from_millis(100),ci(&a,&mut job)).await.is_err());
+        assert_eq!(a.sem.lock().unwrap().get("local").copied(),Some(0));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn names() {

@@ -271,6 +271,8 @@ pub async fn check(a: &Ax, j: &mut Job) -> R<String> {
             );
             Ok(String::new())
         }
+        Err(reason) if reason=="duplicate acceptance result" || reason.starts_with("missing or unexpected named acceptance results") =>
+            Err(X::E(format!("independent verifier infrastructure failure: {reason}"))),
         Err(reason) => Ok(format!(
             "Independent acceptance rejected this candidate:\n{reason}"
         )),
