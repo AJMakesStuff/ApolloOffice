@@ -459,7 +459,10 @@ fn rep(a: &Ax, b: &Value) -> Result<Value, (StatusCode, String)> {
 fn repst(a: &Ax, id: i64) -> Option<Value> {
     let j = a.db.one("select id,repo,num,st,why,pr,t0,t1 from jobs where id=? and json_extract(d,'$.api')=1", pa![id])?;
     let pu = j["pr"].as_i64().map(|n| format!("https://github.com/{}/pull/{n}", j["repo"].as_str().unwrap_or("")));
-    Some(json!({"id": j["id"], "repo": j["repo"], "issue": if j["num"].as_i64().unwrap_or(0) > 0 { j["num"].clone() } else { Value::Null }, "st": j["st"], "why": j["why"], "pr": pu, "t0": j["t0"], "t1": j["t1"]}))
+    let detail = a.db.jg(id).map(|j| j.d).unwrap_or(Value::Null);
+    let lessons = a.db.all("select v from kv where k like ?",pa![format!("lesson:{id}:%")]).iter().filter_map(|r|serde_json::from_str::<Value>(r["v"].as_str()?).ok()).collect::<Vec<_>>();
+    let routing = a.db.all("select v from kv where k like ?",pa![format!("routing:{id}:%")]).iter().filter_map(|r|serde_json::from_str::<Value>(r["v"].as_str()?).ok()).collect::<Vec<_>>();
+    Some(json!({"requirements":{"base":detail["preflight"]["base"],"tools":detail["preflight"]["tools"],"min_sdk":detail["preflight"]["min_sdk"],"unresolved_dependencies":detail["preflight"]["unresolved_dependencies"]},"acceptance":detail["acceptance_proof"],"diff":detail["df"],"proof":detail["proof"],"result":detail["f"],"review":detail["last_review"],"lessons":lessons,"routing":routing,"id": j["id"], "repo": j["repo"], "issue": if j["num"].as_i64().unwrap_or(0) > 0 { j["num"].clone() } else { Value::Null }, "st": j["st"], "why": j["why"], "pr": pu, "t0": j["t0"], "t1": j["t1"]}))
 }
 
 pub fn trk(v: &Value) -> Option<Value> {

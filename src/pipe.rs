@@ -36,7 +36,7 @@ fn oe(o: &Out, s: &str, h: &str) -> X {
     }
 }
 
-async fn x(a: &Ax, j: &Job, s: &str, t: u64) -> Out {
+pub(crate) async fn x(a: &Ax, j: &Job, s: &str, t: u64) -> Out {
     hx(a, &j.h(), &format!("cd \"{}\" && {s}", dir(a, j)), t).await
 }
 
@@ -202,7 +202,7 @@ fn bslug(j: &Job) -> String {
     }
 }
 
-const ART: &[&str] = &[".venv/", "venv/", "__pycache__/", "*.pyc", ".pytest_cache/", ".mypy_cache/", ".ruff_cache/", ".tox/", ".coverage", "node_modules/", ".next/", ".turbo/", "target/", ".gradle/"];
+const ART: &[&str] = &[".venv-bootstrap/", ".venv/", "venv/", "__pycache__/", "*.pyc", ".pytest_cache/", ".mypy_cache/", ".ruff_cache/", ".tox/", ".coverage", "node_modules/", ".next/", ".turbo/", "target/", ".gradle/"];
 
 async fn prep(a: &Ax, j: &mut Job) -> R<()> {
     need(a, "repro", &[&j.h(), "gh"]).await?;
@@ -293,19 +293,33 @@ fn cx(a: &Ax, j: &Job) -> bool {
 async fn repro(a: &Ax, j: &mut Job) -> R<()> {
     a.db.jset(j.id, &[("st", json!("repro"))]);
     let p = format!("Repository: {}. {}.\nVet note: {}\n\n{}", j.repo, j.orig(), j.d["hint"].as_str().unwrap_or("-"), wrap("issue", &format!("{}\n\n{}", if j.s("title").is_empty() { &j.title } else { j.d["title"].as_str().unwrap() }, j.s("body"))));
-    let ms = if cx(a, j) { vec![a.md("big")] } else { vec![a.md("repro"), a.md("repro2")] };
-    for md in ms {
+    let p = format!("{p}{}{}", rules(a,j),crate::quality::context(j));
+    let ms = if crate::routing::enabled(a) { crate::routing::plan(a) } else if cx(a, j) { vec![a.md("big")] } else { vec![a.md("repro"), a.md("repro2")] };
+    let mut reproduction_feedback=String::new();
+    for (attempt, md) in ms.into_iter().enumerate() {
+        crate::routing::event(a, Some(j.id), "repro", attempt, &md, &reproduction_feedback);
         a.st("repro", "work", Some(j.id), "");
         use_(a, j, &md);
         a.say("repro", &format!("{} reproducing {}", crate::prov::name(&md), j.tag()), Some(j.id));
-        let mut o = Ask::new("repro", md, P("repro"), p.clone());
+        let mut o = Ask::new("repro", md, P("repro"), format!("{p}\n{}",wrap("previous-reproduction-diagnostic",&reproduction_feedback)));
         o.job = Some(j.id);
         o.rn = rn(a, j);
         o.turns = 40;
         o.ef = Some("medium");
         o.t = 90 * 60;
-        let (_, js) = ask(a, o).await?;
+        let result = ask(a, o).await;
         x(a, j, "git checkout -q -- . && git clean -fdq", 120).await;
+        let (_, js) = match result {
+            Ok(v) => v,
+            Err(X::Back(e)) => return Err(X::Back(e)),
+            Err(X::Drop(e)) => return Err(X::Drop(e)),
+            Err(e) if crate::routing::enabled(a) => {
+                a.say("repro", &format!("attempt failed: {e}"), Some(j.id));
+                reproduction_feedback=crate::sh::head(&e.to_string(),3000);
+                continue;
+            }
+            Err(e) => return Err(e),
+        };
         if js["ok"].as_bool().unwrap_or(false) {
             j.d["repro"] = json!({"how": js["how"], "where": js["where"], "test": js["test"]});
             a.db.jd(j);
@@ -314,6 +328,7 @@ async fn repro(a: &Ax, j: &mut Job) -> R<()> {
             a.st("repro", "idle", None, "ok");
             return Ok(());
         }
+        reproduction_feedback=crate::sh::head(&js.to_string(),3000);
         a.say("repro", &format!("not reproduced: {}", js["how"].as_str().unwrap_or("no answer")), Some(j.id));
     }
     a.st("repro", "idle", None, "sad");
@@ -359,7 +374,7 @@ pub fn bare(t: &str) -> String {
     t.rsplit(|c| c == ':' || c == '.' || c == '/' || c == '>' || c == ' ').find(|x| !x.trim().is_empty()).unwrap_or(t).trim().to_string()
 }
 
-pub const CE: &str = r"error\[E\d+\]|could not compile|error: no test target|no such command|SyntaxError|ModuleNotFoundError|ImportError while|cannot find module|Cannot find module|ERROR collecting|error TS\d{4}|no tests ran|No tests found|build failed|\[setup failed\]|undefined: |command not found";
+pub const CE: &str = r"error\[E\d+\]|could not compile|error: no test target|no such command|SyntaxError|ModuleNotFoundError|ImportError while|cannot find module|Cannot find module|ERROR collecting|error TS\d{4}|no tests ran|No tests found|build failed|\[setup failed\]|undefined: |command not found|(?m:^[^\n]*\.java:\d+: error:)|ClassNotFoundException|NoClassDefFoundError";
 
 pub fn judge(ts: &[String], a_e: i32, a_o: &str, b_e: i32, b_o: &str) -> String {
     if Regex::new(r"\[checkout failed\]").unwrap().is_match(&format!("{a_o}{b_o}")) {
@@ -408,12 +423,13 @@ async fn verify(a: &Ax, j: &mut Job, f: &Value) -> R<String> {
     ok(a, j, &format!("git checkout -q {}", q(&j.s("br"))), 120).await?;
     let r = judge(&ts, ae, &ao, be, &bo);
     if r.is_empty() {
-        let fl = Regex::new(r"(?i)FAIL|panicked|assert|Error|expected").unwrap();
+        let fl = Regex::new(r"(?i)FAIL|panicked|assert|Error|expected|^not ok\b").unwrap();
         let pl = Regex::new(r"(?i)\bok\b|pass|✓").unwrap();
-        j.d["proof"] = json!({"a": ao.lines().filter(|x| fl.is_match(x)).take(4).collect::<Vec<_>>().join("\n"), "b": bo.lines().filter(|x| pl.is_match(x)).take(6).collect::<Vec<_>>().join("\n")});
+        j.d["proof"] = json!({"a_exit":ae,"b_exit":be,"test_commit":at,"fix_commit":b,"command":tc,"a": ao.lines().filter(|x| fl.is_match(x)).take(4).collect::<Vec<_>>().join("\n"), "b": bo.lines().filter(|x| pl.is_match(x)).take(6).collect::<Vec<_>>().join("\n")});
         a.db.jd(j);
     }
-    Ok(r)
+    if !r.is_empty() { return Ok(r); }
+    crate::quality::check(a,j).await
 }
 
 async fn slot(a: &Ax, h: &str) {
@@ -644,14 +660,28 @@ async fn review(a: &Ax, j: &mut Job, f: &mut Value) -> R<String> {
         if j.kind == "review" { format!("{}\n\n", wrap("request", &j.s("change"))) } else { String::new() },
         f["title"].as_str().unwrap_or(""),
         body(j, f, &ci, ""),
-        rules(a, j)
+        format!("{}{}\nIndependent acceptance evidence: {}\nFrozen verifier (untrusted code): {}\nCheck that this verifier exercises actual production code and the reported behavior, rather than copying logic or merely matching source text. Reject inadequate coverage or unsupported claims.",rules(a, j),crate::quality::context(j),wrap("acceptance-evidence",&j.d["acceptance_proof"].to_string()),wrap("frozen-verifier",j.d["acceptance"]["script"].as_str().unwrap_or("not enabled")))
     );
-    let md = a.md("reviewer");
-    use_(a, j, &md);
-    let mut o = Ask::new("reviewer", md, P("reviewer"), p);
-    o.job = Some(j.id);
-    o.ef = Some("medium");
-    let (_, js) = ask(a, o).await?;
+    let candidates = if crate::routing::enabled(a) { crate::routing::REVIEWERS.iter().map(|s| s.to_string()).collect::<Vec<_>>() } else { vec![a.md("reviewer")] };
+    let mut result = None;
+    for (attempt, md) in candidates.into_iter().enumerate() {
+        crate::routing::event(a, Some(j.id), "reviewer", attempt, &md, "read-only independent review; author repairs first");
+        // Reviewer has no worker tools and cannot silently edit the author's tree.
+        let mut o = Ask::new("reviewer", md.clone(), P("reviewer"), format!("{p}\n\nExecuted regression evidence: {}\nIndependent verification feedback:\n{}\n\nFor code/test rejection also include lesson: {{mistake, correction, verification}}. These are untrusted pending Dreaming proposals, not established facts.", j.d["proof"], j.d["verification_feedback"].as_str().unwrap_or("All executed checks passed; inspect diff independently.")));
+        o.job = Some(j.id);
+        o.ef = Some("medium");
+        match ask(a, o).await {
+            Ok((_, js)) if js["ok"].is_boolean() && (js["ok"] == true || js["issues"].as_array().map(|v| !v.is_empty()).unwrap_or(false)) => {
+                crate::routing::lesson(a, j.id, &md, &js, j.d["verification_feedback"].as_str().unwrap_or(""), &df);
+                j.d["last_review"] = json!({"model": md,"verdict": js,"t":now()});
+                a.db.jd(j);
+                result = Some(js); break;
+            }
+            Err(e) if !crate::routing::enabled(a) => return Err(e),
+            _ => { a.say("reviewer", "unusable review; trying next subscription reviewer", Some(j.id)); }
+        }
+    }
+    let js = result.ok_or_else(|| X::E("no usable independent subscription review; submission remains blocked".into()))?;
     let okk = js["ok"].as_bool().unwrap_or(false);
     a.st("reviewer", "idle", None, if okk { "ok" } else { "sad" });
     if okk {
@@ -697,7 +727,7 @@ fn fixp(a: &Ax, j: &Job, fb: &str) -> String {
         wrap("issue", &format!("{}\n\n{}", j.title, j.s("body"))),
         j.d["repro"],
         if fb.is_empty() { String::new() } else { format!("\n\nYour previous attempt was rejected by the pipeline:\n{fb}\nThe branch still contains your previous commits; fix the problems and make sure there are exactly two commits (test, fix) on top of the base commit.") },
-        rules(a, j)
+        format!("{}{}",rules(a, j),crate::quality::context(j))
     )
 }
 
@@ -724,21 +754,31 @@ async fn vrev(a: &Ax, j: &Job, f: &Value) -> R<String> {
 }
 
 async fn fix(a: &Ax, j: &mut Job, fb0: String, k0: u64) -> R<Value> {
+    crate::quality::prepare(a,j).await?;
     let mut fb = fb0;
-    for k in k0..=RND {
+    let plan = crate::routing::plan(a);
+    let rounds = if crate::routing::enabled(a) { plan.len() as u64 } else { RND + 1 };
+    for k in k0..rounds {
         kill(a, j)?;
         a.db.jset(j.id, &[("st", json!("fix"))]);
         a.st("fixer", "work", Some(j.id), "");
         a.say("fixer", &format!("{}fixing {}", if k > 0 { format!("round {}: ", k + 1) } else { String::new() }, j.tag()), Some(j.id));
         let c = cx(a, j);
-        let md = if c { a.md("big") } else { a.md("fixer") };
+        let md = if crate::routing::enabled(a) { plan[k as usize].clone() } else if c { a.md("big") } else { a.md("fixer") };
+        crate::routing::event(a, Some(j.id), "fixer", k as usize, &md, &fb);
         use_(a, j, &md);
         let mut o = Ask::new("fixer", md, P("fixer"), fixp(a, j, &fb));
         o.job = Some(j.id);
         o.rn = rn(a, j);
         o.turns = if c { 200 } else { 120 };
         o.t = if c { 180 * 60 } else { 120 * 60 };
-        let (_, js) = ask(a, o).await?;
+        let (_, js) = match ask(a, o).await {
+            Ok(v) => v,
+            Err(X::Back(e)) => return Err(X::Back(e)),
+            Err(X::Drop(e)) => return Err(X::Drop(e)),
+            Err(e) if crate::routing::enabled(a) => { fb = format!("Model attempt failed: {e}. Inspect the existing tree and preserve useful work."); continue; }
+            Err(e) => return Err(e),
+        };
         a.st("fixer", "idle", None, "");
         if js.is_null() {
             fb = "Your answer contained no JSON.".into();
@@ -746,6 +786,7 @@ async fn fix(a: &Ax, j: &mut Job, fb0: String, k0: u64) -> R<Value> {
         }
         if let Some(g) = js["give_up"].as_str() {
             a.st("fixer", "idle", None, "sad");
+            if crate::routing::enabled(a) { fb = format!("Previous model gave up: {g}. Inspect the tree and repair the actual issue."); continue; }
             return drop(format!("Fixer gave up: {g}"));
         }
         a.say("fixer", &format!("done: {}", js["title"].as_str().unwrap_or("")), Some(j.id));
@@ -756,6 +797,11 @@ async fn fix(a: &Ax, j: &mut Job, fb0: String, k0: u64) -> R<Value> {
         fb = if j.kind == "review" { vrev(a, j, &js).await? } else { verify(a, j, &js).await? };
         if !fb.is_empty() {
             a.say("fixer", &format!("proof missing: {}", fb.lines().next().unwrap_or("")), Some(j.id));
+            if crate::routing::enabled(a) {
+                j.d["verification_feedback"] = json!(fb.clone());
+                let diagnosis = review(a, j, &mut js.clone()).await?;
+                fb.push_str(&format!("\n{diagnosis}"));
+            }
             continue;
         }
         fb = ci(a, j).await?;
@@ -764,8 +810,14 @@ async fn fix(a: &Ax, j: &mut Job, fb0: String, k0: u64) -> R<Value> {
             return drop(format!("{fb} on {}", j.h()));
         }
         if !fb.is_empty() {
+            if crate::routing::enabled(a) {
+                j.d["verification_feedback"] = json!(fb.clone());
+                let diagnosis = review(a, j, &mut js.clone()).await?;
+                fb.push_str(&format!("\n{diagnosis}"));
+            }
             continue;
         }
+        j.d["verification_feedback"] = json!("Executed regression proof and repository CI passed.");
         let mut f = js.clone();
         fb = review(a, j, &mut f).await?;
         if !fb.is_empty() {
@@ -777,7 +829,7 @@ async fn fix(a: &Ax, j: &mut Job, fb0: String, k0: u64) -> R<Value> {
         return Ok(f);
     }
     a.st("fixer", "idle", None, "sad");
-    drop(format!("no valid fix after {} rounds: {}", RND + 1, fb.lines().next().unwrap_or("")))
+    drop(format!("no valid fix after {} rounds: {}", rounds, fb.lines().next().unwrap_or("")))
 }
 
 async fn reb(a: &Ax, j: &mut Job) -> R<()> {
@@ -918,6 +970,8 @@ async fn gate(a: &Ax, j: &mut Job) -> R<()> {
         }
     }
     if nb == j.s("base") {
+        let result=crate::quality::check(a,j).await?;
+        if !result.is_empty() { return drop(result); }
         a.say("submit", "default branch unchanged, proofs still valid", Some(j.id));
         return Ok(());
     }
@@ -988,6 +1042,23 @@ async fn mkbody(a: &Ax, j: &mut Job) -> R<()> {
 }
 
 async fn submit(a: &Ax, j: &mut Job) -> R<(String, i64)> {
+    // Every path, including recovery/resume, must pass this boundary before any
+    // squash, push or GitHub request. A resumed job is not an approval grant.
+    if crate::routing::enabled(a) && j.d["ap"].as_bool() != Some(true) {
+        // Persist the hold before any fallible worker/preview operation.
+        a.db.jset(j.id,&[("st",json!("approve")),("why",json!("waiting for explicit owner approval, including resumed jobs"))]);
+        let f=j.d["f"].clone();
+        let ci=rp(a,&j.repo)["ci"].as_str().unwrap_or("").to_string();
+        j.d["pt"]=json!(f["title"].as_str().unwrap_or(&j.title));
+        j.d["pb"]=json!(body(j,&f,&ci,fo(a,j)));
+        let tip=if j.s("br").is_empty() { "HEAD".to_string() } else { j.s("br") };
+        let range=q(&format!("{}..{}",j.s("base"),tip));
+        j.d["df"]=json!(ok(a,j,&format!("git diff {range} -- | head -c 120000"),120).await.unwrap_or_default());
+        a.db.jd(j);
+        a.say("submit","submission held: resumed work does not grant owner approval",Some(j.id));
+        clean(a,j).await;
+        return Err(X::Back(String::new()));
+    }
     a.db.jset(j.id, &[("st", json!("submit"))]);
     a.st("submit", "work", Some(j.id), "");
     a.flow("reviewer", "submit", &j.tag());
@@ -1129,7 +1200,7 @@ where
     loop {
         match f().await {
             Ok(v) => return Ok(v),
-            Err(X::Lim(m)) | Err(X::Net(m)) if k < 8 => {
+            Err(X::Lim(m)) | Err(X::Net(m)) if k < 8 && !crate::routing::enabled(a) => {
                 k += 1;
                 a.say(w, &format!("waiting: {}", crate::sh::head(&m, 120)), None);
                 let _ = need(a, w, &["gh", "an"]).await;
@@ -1204,7 +1275,8 @@ async fn resume(a: &Ax, j: &mut Job) -> R<Value> {
         a.db.jd(j);
     }
     let k = j.d["k"].as_u64().unwrap_or(0);
-    let mut fb = ci(a, j).await?;
+    let mut fb = crate::quality::check(a,j).await?;
+    if fb.is_empty() { fb = ci(a, j).await?; }
     if fb.starts_with("CI aborted after") {
         return drop(format!("{fb} on {}", j.h()));
     }
@@ -1276,6 +1348,7 @@ async fn go(a: &Ax, id: i64, h: &str) {
             .await
             .map(|x| jj = x)?;
             j = jj;
+            crate::quality::inspect(a,&mut j).await?;
             kill(a, &j)?;
             if j.kind == "hunt" {
                 let mut jj = j.clone();
@@ -1350,7 +1423,7 @@ async fn go(a: &Ax, id: i64, h: &str) {
             mkbody(a, &mut j).await?;
             j.d["pbase"] = json!(j.s("base"));
             a.db.jd(&j);
-            let auto = rp(a, &j.repo)["mode"].as_str() == Some("auto") || j.kind != "fix";
+            let auto = !crate::routing::enabled(a) && (rp(a, &j.repo)["mode"].as_str() == Some("auto") || j.kind != "fix");
             if !auto && !j.d["ap"].as_bool().unwrap_or(false) {
                 a.db.jset(id, &[("st", json!("approve")), ("why", json!("waiting for your approval"))]);
                 a.st("submit", "idle", None, "ok");
@@ -1510,6 +1583,7 @@ async fn pick(a: &Ax, h: &str) -> Option<i64> {
 }
 
 fn hn(a: &Ax) -> i64 {
+    if crate::routing::enabled(a) { return 0; }
     let cap = a.set()["hunters"].as_i64().unwrap_or(2).clamp(0, 12);
     let l: i64 = hosts(a).iter().filter(|h| h.on && a.net(&h.id)).map(|h| h.ln).sum();
     let hf = a.db.n("select count(*) from jobs where kind='fix' and num=0 and st in ('vet','ready') and json_extract(d,'$.ext') is null", pa![]);
@@ -1557,7 +1631,12 @@ async fn lane(a: Ax, h: String, k: i64) {
         };
         let r = a.db.jg(id).map(|j| j.repo).unwrap_or_default();
         a.lv.lock().unwrap().ln.insert(id, key.clone());
-        go(&a, id, &h).await;
+        if crate::routing::enabled(&a) {
+            if tokio::time::timeout(std::time::Duration::from_secs(1800), go(&a,id,&h)).await.is_err() {
+                a.db.jset(id, &[("st",json!("drop")),("why",json!("free-first job deadline exceeded (1800s)"))]);
+                idle_all(&a,id);
+            }
+        } else { go(&a,id,&h).await; }
         a.lv.lock().unwrap().ln.remove(&id);
         a.act.lock().unwrap().remove(&format!("{r} {h}"));
         a.lk.lock().unwrap().remove(&id);
@@ -1722,4 +1801,130 @@ mod t {
         assert_eq!(bslug(&j), "fix/12-crash-on-empty-input");
         assert_eq!(slug("a/b"), "a__b");
     }
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn subscription_review_returns_free_author_feedback_and_stages_proposal() {
+        let _cli_lock=crate::ai::CLI_TEST_LOCK.lock().await;
+        use std::os::unix::fs::PermissionsExt;
+        let dd=std::env::temp_dir().join(format!("apollo-review-{}",hex::encode(rand::random::<[u8;8]>())));
+        let repo=dd.join("work/o__r");std::fs::create_dir_all(&repo).unwrap();
+        let git=|args:&[&str]| {
+            let out=std::process::Command::new("git").args(args).current_dir(&repo).output().unwrap();
+            assert!(out.status.success(),"{}",String::from_utf8_lossy(&out.stderr));
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        git(&["init","-q","-b","main"]);
+        std::fs::write(repo.join("sum.py"),"def add(a,b): return a-b\n").unwrap();
+        git(&["add","sum.py"]);git(&["-c","user.name=fixture","-c","user.email=fixture@localhost","commit","-qm","base"]);
+        let base=git(&["rev-parse","HEAD"]);
+        std::fs::write(repo.join("sum.py"),"def add(a,b): return 5\n").unwrap();
+        git(&["add","sum.py"]);git(&["-c","user.name=fixture","-c","user.email=fixture@localhost","commit","-qm","bad hardcoded fix"]);
+        let cli=dd.join("review-cli");
+        std::fs::write(&cli,r##"#!/usr/bin/python3
+import sys,json,pathlib
+args=sys.argv[1:];text=sys.stdin.read()
+assert 'read-only' in args and '--ignore-user-config' in args
+assert not any('mcp_servers.office' in x for x in args), 'reviewer must have no worker tools'
+assert 'def add(a,b): return 5' in text
+assert 'real fixture verification: negative addition fails' in text
+answer=json.dumps({'ok':False,'issues':['Replace hardcoded 5 with a+b; test negative values too.'],'lesson':{'mistake':'Hardcoded example instead of general arithmetic.','correction':'Implement a+b.','verification':'Exercise positive and negative integers.'}})
+pathlib.Path(args[args.index('-o')+1]).write_text(answer)
+print(json.dumps({'type':'item.completed','item':{'type':'agent_message','text':answer}}))
+print(json.dumps({'type':'turn.completed','usage':{'input_tokens':10,'output_tokens':10}}))
+"##).unwrap();
+        std::fs::set_permissions(&cli,std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::env::set_var("APOLLO_OFFICE_CODEX",&cli);
+        let db=crate::db::Db::mem();
+        db.ks("set",&json!({"free_first":true}));
+        db.run("insert into hs(id,ssh,dk,raw,on_) values('local','',0,1,1)",pa![]);
+        db.run("insert into rp(full,ci) values('o/r','python3 sum.py')",pa![]);
+        let id=db.jnew("o/r",0,"fix","addition bug","", "fix","",json!({"h":"local","base":base,"ext":{"src":"fixture"},"verification_feedback":"real fixture verification: negative addition fails"}),None,0.0);
+        let a=std::sync::Arc::new(crate::app::App::new(db,dd.clone(),1,"apollo-office".into()));
+        let mut job=a.db.jg(id).unwrap();
+        let mut f=json!({"title":"Fix addition","cause":"subtraction","fix":"hardcode five"});
+        let feedback=review(&a,&mut job,&mut f).await.unwrap();
+        std::env::remove_var("APOLLO_OFFICE_CODEX");
+        assert!(feedback.contains("Replace hardcoded 5"));
+        assert_eq!(a.db.jg(id).unwrap().d["last_review"]["model"],"codex:");
+        assert_eq!(a.db.n("select count(*) from kv where k like 'lesson:%'",pa![]),1);
+        assert!(!a.db.jg(id).unwrap().d["ms"].as_array().map(|v|v.contains(&json!("codex:"))).unwrap_or(false),"review must not claim code authorship");
+        std::fs::remove_dir_all(dd).unwrap();
+    }
+
+    #[test]
+    fn java_compile_or_loading_failure_is_not_a_regression_proof() {
+        let names=vec!["channel_identity".to_string()];
+        assert!(judge(&names,1,"BlockedChannelData.java:24: error: cannot find symbol\nchannel_identity",0,"channel_identity OK").contains("compile or load"));
+        assert!(judge(&names,1,"channel_identity java.lang.ClassNotFoundException: BlockedChannelData",0,"channel_identity OK").contains("compile or load"));
+        assert!(judge(&names,1,"channel_identity java.lang.AssertionError: distinct IDs collide",0,"channel_identity OK").is_empty());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn independent_acceptance_rejects_author_tests_green_and_feedback_reaches_fixer() {
+        use sha2::{Digest,Sha256};
+        let dd=std::env::temp_dir().join(format!("apollo-independent-{}",hex::encode(rand::random::<[u8;8]>())));
+        let repo=dd.join("work/o__r");std::fs::create_dir_all(&repo).unwrap();
+        let git=|args:&[&str]| {
+            let out=std::process::Command::new("git").args(args).current_dir(&repo).output().unwrap();
+            assert!(out.status.success(),"{}",String::from_utf8_lossy(&out.stderr));String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        let commit=||{git(&["add","."]);git(&["-c","user.name=fixture","-c","user.email=fixture@localhost","commit","-qm","fixture"]);git(&["rev-parse","HEAD"])};
+        git(&["init","-q","-b","work"]);
+        std::fs::write(repo.join("maths.py"),"def add(a,b): return a-b\n").unwrap();let base=commit();
+        std::fs::write(repo.join("author_test.py"),"from maths import add\nimport sys\nok=add(2,3)==5\nprint('positive_addition', 'PASS' if ok else 'FAIL')\nsys.exit(0 if ok else 1)\n").unwrap();commit();
+        std::fs::write(repo.join("maths.py"),"def add(a,b): return 5\n").unwrap();commit();
+        let script="import os,pathlib,runpy\nm=runpy.run_path(str(pathlib.Path(os.environ['APOLLO_SOURCE_ROOT'])/'maths.py'))\nok=m['add'](-2,3)==1\nprint('APOLLO_CHECK:negative_addition:'+('PASS' if ok else 'FAIL'))\nraise SystemExit(0 if ok else 1)\n";
+        let frozen=json!({"base":base,"baseline_valid":true,"designer":"fixture-independent-reviewer","checks":["negative_addition"],"script":script});
+        let db=crate::db::Db::mem();db.ks("set",&json!({"quality_checks":true}));
+        db.run("insert into hs(id,ssh,dk,raw,on_) values('local','',0,1,1)",pa![]);
+        db.run("insert into rp(full,ci) values('o/r','python3 author_test.py')",pa![]);
+        let id=db.jnew("o/r",0,"fix","addition","","fix","",json!({"h":"local","base":base,"br":"work","acceptance":frozen}),None,0.0);
+        let a=std::sync::Arc::new(crate::app::App::new(db,dd.clone(),1,"apollo-office".into()));let mut job=a.db.jg(id).unwrap();
+        let feedback=verify(&a,&mut job,&json!({"tests":["positive_addition"],"test_cmd":"PYTHONDONTWRITEBYTECODE=1 python3 author_test.py"})).await.unwrap();
+        assert_eq!(job.d["proof"]["b_exit"],0,"author's tests must really be green");
+        assert!(feedback.contains("negative_addition"),"{feedback}");
+        assert_eq!(job.d["acceptance_proof"]["ok"],false);
+        assert!(fixp(&a,&job,&feedback).contains("Independent acceptance rejected"));
+        assert_eq!(job.d["acceptance_proof"]["run"]["script_sha256"],json!(hex::encode(Sha256::digest(script.as_bytes()))));
+        std::fs::remove_dir_all(dd).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn resumed_free_first_submission_without_owner_approval_never_invokes_github() {
+        use std::os::unix::fs::PermissionsExt;
+        let dd=std::env::temp_dir().join(format!("apollo-publish-{}",hex::encode(rand::random::<[u8;8]>())));
+        let repo=dd.join("work/o__r");std::fs::create_dir_all(&repo).unwrap();
+        let git=|args:&[&str]| {
+            let out=std::process::Command::new("git").args(args).current_dir(&repo).output().unwrap();
+            assert!(out.status.success());String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        git(&["init","-q","-b","work"]);std::fs::write(repo.join("file"),"fixture\n").unwrap();
+        git(&["add","file"]);git(&["-c","user.name=fixture","-c","user.email=fixture@localhost","commit","-qm","base"]);
+        let base=git(&["rev-parse","HEAD"]);let marker=dd.join("github-called");let gh=dd.join("gh");
+        std::fs::write(&gh,format!("#!/bin/sh\nprintf called > {}\nexit 97\n",q(&marker.display().to_string()))).unwrap();
+        std::fs::set_permissions(&gh,std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::env::set_var("APOLLO_OFFICE_GH",&gh);
+        let db=crate::db::Db::mem();db.ks("set",&json!({"free_first":true}));
+        db.run("insert into hs(id,ssh,dk,raw,on_) values('local','',0,1,1)",pa![]);
+        db.run("insert into rp(full,mode) values('o/r','auto')",pa![]);
+        let id=db.jnew("o/r",0,"fix","fixture","","ready","resumed",json!({"h":"local","base":base,"br":"work","rs":true,"ap":false,"f":{"title":"Fixture","tests":[],"test_cmd":"true"}}),None,0.0);
+        let a=std::sync::Arc::new(crate::app::App::new(db,dd.clone(),1,"apollo-office".into()));
+        // Missing and malformed grants, plus an unusable preview base, must
+        // all remain held. The fake GitHub executable detects publication.
+        for grant in [json!(false),Value::Null,json!("true"),json!(1)] {
+            let mut job=a.db.jg(id).unwrap();
+            job.d["ap"]=grant;
+            job.d["base"]=json!("nonexistent-preview-base");
+            a.db.jset(id,&[("st",json!("ready"))]);
+            let result=tokio::time::timeout(std::time::Duration::from_secs(2),submit(&a,&mut job)).await;
+            assert!(!marker.exists(),"resuming a job must not invoke GitHub without owner approval");
+            assert!(matches!(result,Ok(Err(X::Back(ref reason))) if reason.is_empty()));
+            assert_eq!(a.db.jg(id).unwrap().st,"approve");
+        }
+        std::env::remove_var("APOLLO_OFFICE_GH");
+        std::fs::remove_dir_all(dd).unwrap();
+    }
+
 }

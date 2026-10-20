@@ -129,6 +129,13 @@ impl<'a> Default for Rq<'a> {
 pub async fn run(p: &str, a: &[String], r: Rq<'_>) -> Out {
     let mut c = cmd(p, a);
     c.stdin(if r.i.is_some() { Stdio::piped() } else { Stdio::null() }).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
+    // Provider/controller secrets must not enter CLI or worker subprocesses.
+    for (k, _) in std::env::vars_os() {
+        let name = k.to_string_lossy();
+        if name.ends_with("_API_KEY") || name.starts_with("MIGRATION_PROVIDER_") || name == "ANTHROPIC_AUTH_TOKEN" {
+            c.env_remove(&k);
+        }
+    }
     for k in &r.rm {
         c.env_remove(k);
     }
@@ -143,6 +150,9 @@ pub async fn run(p: &str, a: &[String], r: Rq<'_>) -> Out {
         Err(e) => return Out { c: -1, o: String::new(), e: format!("{p}: {e}") },
     };
     let pid = ch.id().unwrap_or(0);
+    struct ProcessGroup(u32);
+    impl Drop for ProcessGroup { fn drop(&mut self) { if self.0 > 0 { kill(self.0); } } }
+    let _process_group = ProcessGroup(pid);
     if let (Some(i), Some(mut si)) = (r.i.clone(), ch.stdin.take()) {
         tokio::spawn(async move {
             let _ = si.write_all(i.as_bytes()).await;
@@ -312,7 +322,7 @@ pub const PRE: &str = "ulimit -n 10240 2>/dev/null; export PATH=\"$HOME/.cargo/b
 fn sshv(h: &Ho) -> Vec<String> {
     let mut v: Vec<String> = vec!["-o".into(), "ConnectTimeout=15".into(), "-o".into(), "ServerAliveInterval=15".into(), "-o".into(), "ServerAliveCountMax=4".into(), "-o".into(), "BatchMode=yes".into()];
     if cfg!(unix) {
-        if let Some(d) = dirs::home_dir() {
+        if let Some(d) = std::env::var_os("APOLLO_OFFICE_SSH_CONTROL_DIR").map(PathBuf::from).or_else(dirs::home_dir) {
             v.extend(["-o".into(), "ControlMaster=auto".into(), "-o".into(), format!("ControlPath={}/.ssh/cm-ao-%r@%h:%p", d.display()), "-o".into(), "ControlPersist=10m".into()]);
         }
     }
@@ -350,24 +360,21 @@ pub async fn hxk(a: &App, id: &str, s: &str, t: u64) -> Out {
 
 async fn hxo(a: &App, id: &str, s: &str, t: u64, ln: Option<&(dyn Fn(&str) + Send + Sync)>, keep: bool) -> Out {
     let Some(h) = ho(a, id) else { return Out { c: -1, o: String::new(), e: format!("machine {id} is gone") } };
+    let pilot = crate::routing::enabled(a);
+    let t = if pilot { t.min(180) } else { t };
+    // Stream even large git bundles through stdin; never place a script in argv.
+    // The timeout runs on the worker, so disconnecting cannot orphan its command.
     let i = format!("{PRE}{}{s}", jobs(a, &h));
-    let mut v: Vec<String> = vec![];
-    let p = if h.ssh.is_empty() {
-        if h.dk {
-            v.extend(["exec".into(), "-i".into(), CT.into(), "bash".into(), "-s".into()]);
-            tool("docker")
-        } else {
-            v.push("-s".into());
-            bash()
-        }
+    let mut command: Vec<String> = if h.dk { vec!["docker".into(), "exec".into(), "-i".into(), CT.into()] } else { vec![] };
+    if pilot { command.extend(["timeout".into(), "-k".into(), "5".into(), format!("{t}s")]); }
+    command.extend(["bash".into(), "-s".into()]);
+    let (p, v) = if h.ssh.is_empty() {
+        let program = command.remove(0);
+        (if program == "bash" { bash() } else { tool(&program) }, command)
     } else {
-        v = sshv(&h);
-        if h.dk {
-            v.extend(["docker".into(), "exec".into(), "-i".into(), CT.into(), "bash".into(), "-s".into()]);
-        } else {
-            v.extend(["bash".into(), "-s".into()]);
-        }
-        tool("ssh")
+        let mut args = sshv(&h);
+        args.extend(command);
+        (tool("ssh"), args)
     };
     let r = run(&p, &v, Rq { i: Some(i), t, ln, keep, ..Default::default() }).await;
     if h.dk && r.c != 0 && (r.e.contains("is not running") || r.e.contains("No such container")) {
@@ -435,14 +442,33 @@ pub async fn ghj(a: &[&str], t: u64) -> Result<Value, String> {
 }
 
 pub async fn apip(p: &str) -> Result<Vec<Value>, String> {
-    let o = gh(&["api", "--paginate", "--slurp", "-H", "Accept: application/vnd.github+json", p], 180).await?;
-    let v: Value = serde_json::from_str(&o).map_err(|e| format!("gh json: {e}"))?;
-    Ok(v.as_array().cloned().unwrap_or_default().into_iter().flat_map(|x| x.as_array().cloned().unwrap_or_default()).collect())
+    // --paginate emits a stream of JSON arrays on old and new gh versions.
+    // --slurp is unavailable in the distro's installed gh 2.46.
+    let o = gh(&["api", "--paginate", "-H", "Accept: application/vnd.github+json", p], 180).await?;
+    api_pages(&o)
+}
+
+fn api_pages(output: &str) -> Result<Vec<Value>, String> {
+    let mut rows = Vec::new();
+    for page in serde_json::Deserializer::from_str(output).into_iter::<Value>() {
+        let page = page.map_err(|e|format!("gh paginated json: {e}"))?;
+        let Value::Array(items) = page else { return Err("gh paginated response must contain arrays".into()); };
+        rows.extend(items);
+    }
+    Ok(rows)
 }
 
 #[cfg(test)]
 mod t {
     use super::*;
+
+    #[test]
+    fn paginated_api_accepts_old_cli_streams_without_hiding_invalid_pages() {
+        assert_eq!(api_pages("[{\"id\":1}]\n[]\n[{\"id\":2}]").unwrap(),vec![serde_json::json!({"id":1}),serde_json::json!({"id":2})]);
+        assert!(api_pages("[]").unwrap().is_empty());
+        assert!(api_pages("[{\"id\":1}]\n[{broken").is_err());
+        assert!(api_pages("[]\n{\"message\":\"error\"}").is_err());
+    }
 
     #[tokio::test]
     async fn keeps_long_output() {
@@ -455,4 +481,16 @@ mod t {
         let r = run(&bash(), &["-c".into(), "printf a >&2; printf '€%.0s' {1..200000} >&2".into()], Rq { t: 30, ..Default::default() }).await;
         assert!(r.e.len() <= MAXO && r.e.ends_with('€'));
     }
+    #[tokio::test]
+    async fn pilot_streams_large_scripts_without_exec_argument_limits() {
+        let db=crate::db::Db::mem();
+        db.ks("set",&serde_json::json!({"free_first":true}));
+        db.run("insert into hs(id,ssh,dk,raw,on_) values('local','',0,1,1)",pa![]);
+        let a=App::new(db,std::env::temp_dir(),1,"apollo-office".into());
+        let script=format!("#{}\nprintf BUNDLE_STREAM_OK\n","x".repeat(200_000));
+        let r=hxk(&a,"local",&script,10).await;
+        assert_eq!(r.c,0,"{}",r.e);
+        assert!(r.o.ends_with("BUNDLE_STREAM_OK"));
+    }
+
 }

@@ -96,7 +96,11 @@ pub async fn call(a: &Ax, r: &Rn, n: &str, g: &Value) -> Result<String, String> 
                 return Err("command not allowed here".into());
             }
             let m = g["min"].as_u64().unwrap_or(20).clamp(1, 60);
-            let o = hx(a, &r.h, &format!("cd \"{d}\" && {{ to {} bash -c {}\n}} 2>&1; echo \"[exit $?]\"", m * 60, q(&c)), m * 60 + 30).await;
+            // The controller already prepared this project environment. Make it
+            // the default for model commands too, including commands that cd
+            // into a subdirectory. Never source repository activation scripts.
+            let env = "if [ -x .venv/bin/python ]; then export VIRTUAL_ENV=\"$PWD/.venv\"; export PATH=\"$PWD/.venv/bin:$PATH\"; fi";
+            let o = hx(a, &r.h, &format!("cd \"{d}\" && {{ {env}; to {} bash -c {}\n}} 2>&1; echo \"[exit $?]\"", m * 60, q(&c)), m * 60 + 30).await;
             let t = o.all();
             Ok(if t.len() > 30000 { format!("…{}", crate::sh::last(&t, 30000)) } else { t })
         }
@@ -157,6 +161,30 @@ pub async fn bridge(port: u16, t: String) {
 #[cfg(test)]
 mod t {
     use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn shell_uses_prepared_project_environment_after_changing_directory() {
+        use std::os::unix::fs::PermissionsExt;
+        let root=std::env::temp_dir().join(format!("apollo-venv-{}",hex::encode(rand::random::<[u8;8]>())));
+        std::fs::create_dir_all(root.join(".venv/bin")).unwrap();std::fs::create_dir(root.join("tool")).unwrap();
+        let python=root.join(".venv/bin/python");
+        std::fs::write(&python,"#!/bin/sh\nprintf 'prepared-project-python\\n'\n").unwrap();
+        std::fs::set_permissions(&python,std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::os::unix::fs::symlink("python",root.join(".venv/bin/python3")).unwrap();
+        std::fs::write(root.join(".venv/bin/activate"),"echo UNSAFE_ACTIVATION >&2; exit 90\n").unwrap();
+        let db=crate::db::Db::mem();db.run("insert into hs(id,on_) values('local',1)",crate::pa![]);
+        let a=std::sync::Arc::new(crate::app::App::new(db,root.clone(),1,"x".into()));
+        let r=Rn{h:"local".into(),dir:root.display().to_string(),w:String::new()};
+        let out=call(&a,&r,"sh",&json!({"cmd":"cd tool && python3 && printf '%s' \"$VIRTUAL_ENV\""})).await.unwrap();
+        assert!(out.contains("prepared-project-python"),"{out}");assert!(out.contains(&root.join(".venv").display().to_string()),"{out}");
+        assert!(!out.contains("UNSAFE_ACTIVATION"));assert!(out.contains("[exit 0]"),"{out}");
+        let missing=Rn{h:"local".into(),dir:root.join("missing").display().to_string(),w:String::new()};
+        let out=call(&a,&missing,"sh",&json!({"cmd":"echo OUTSIDE_WORKSPACE"})).await.unwrap();
+        assert!(!out.contains("OUTSIDE_WORKSPACE"),"must not run when cd fails: {out}");
+        assert!(out.contains("[exit 1]"),"{out}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn paths() {
