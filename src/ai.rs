@@ -86,10 +86,11 @@ pub async fn ask(a: &Ax, o: Ask) -> R<(String, Value)> {
     let mut lp = String::new();
     loop {
         a.tick();
-        let mut p = a.lv.lock().unwrap().o.pause.clone();
-        if p.is_empty() {
-            p = rbud(a, o.job).unwrap_or_default();
+        if !a.lv.lock().unwrap().o.pause.is_empty() {
+            sl(60_000).await;
+            continue;
         }
+        let p = rbud(a, o.job).unwrap_or_default();
         if p.is_empty() {
             break;
         }

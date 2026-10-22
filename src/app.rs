@@ -304,6 +304,7 @@ impl App {
         let bu = if bd > 0.0 { self.db.usd(None) } else { 0.0 };
         let free_first=crate::routing::enabled(self);
         let mut l = self.lv.lock().unwrap();
+        let p0 = l.o.pause.clone();
         if l.o.rst > 0 && l.o.rst <= n {
             l.o.rl = "allowed".into();
             l.o.rst = 0;
@@ -321,6 +322,11 @@ impl App {
         } else {
             String::new()
         };
+        let p1 = l.o.pause.clone();
+        drop_(l);
+        if p1 != p0 {
+            self.say("scout", if p1.is_empty() { "office resumed" } else { &p1 }, None);
+        }
     }
 
     pub fn rl(&self, i: &Value) {
