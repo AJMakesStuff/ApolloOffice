@@ -83,6 +83,7 @@ const LIM: &str = r"(?i)usage limit|rate.?limit|limit reached|429|overloaded";
 
 pub async fn ask(a: &Ax, o: Ask) -> R<(String, Value)> {
     a.tick();
+    let mut lp = String::new();
     loop {
         a.tick();
         let mut p = a.lv.lock().unwrap().o.pause.clone();
@@ -92,7 +93,10 @@ pub async fn ask(a: &Ax, o: Ask) -> R<(String, Value)> {
         if p.is_empty() {
             break;
         }
-        a.say(o.w, &p, o.job);
+        if p != lp {
+            a.say(o.w, &p, o.job);
+            lp = p;
+        }
         sl(60_000).await;
     }
     // Coding/reproduction retries are controlled by the pipeline, where actual
