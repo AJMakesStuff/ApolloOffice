@@ -4,7 +4,7 @@ use crate::db::now;
 use crate::net::need;
 use crate::pa;
 use crate::pipe::rp;
-use crate::sh::{apip, ghj};
+use crate::sh::{apip, gh, ghj};
 use regex::Regex;
 use serde_json::{json, Value};
 use std::future::Future;
@@ -416,12 +416,25 @@ async fn watch1(a: &Ax) -> R<()> {
                 let mc: Vec<&Value> = okc.iter().filter(|c| MA.contains(&c["as"].as_str().unwrap_or(""))).cloned().collect();
                 let ma = !mc.is_empty();
                 let src: &Vec<&Value> = if ma { &mc } else { &okc };
-                let pr = format!("PR {tag}: {}\n\n{}", v["title"].as_str().unwrap_or(""), src.iter().map(|c| wrap(c["id"].as_str().unwrap_or(""), &format!("{} by {} ({})\n\n{}", c["k"].as_str().unwrap_or(""), c["by"].as_str().unwrap_or(""), c["as"].as_str().unwrap_or(""), crate::sh::head(c["t"].as_str().unwrap_or(""), 4000)))).collect::<Vec<_>>().join("\n\n"));
+                let pv = ghj(&["pr", "view", &n.to_string(), "-R", &r, "--json", "body,files"], 60).await.unwrap_or(Value::Null);
+                let fl = pv["files"].as_array().map(|x| x.iter().filter_map(|f| f["path"].as_str()).collect::<Vec<_>>().join("\n")).unwrap_or_default();
+                let pr = format!("PR {tag}: {}\n\n{}\n\n{}\n\n{}", v["title"].as_str().unwrap_or(""), wrap("description", &crate::sh::head(pv["body"].as_str().unwrap_or(""), 4000)), wrap("files", &crate::sh::head(&fl, 2000)), src.iter().map(|c| wrap(c["id"].as_str().unwrap_or(""), &format!("{} by {} ({})\n\n{}", c["k"].as_str().unwrap_or(""), c["by"].as_str().unwrap_or(""), c["as"].as_str().unwrap_or(""), crate::sh::head(c["t"].as_str().unwrap_or(""), 4000)))).collect::<Vec<_>>().join("\n\n"));
                 let mut o = Ask::new("watcher", a.md("watcher"), P("watcher"), pr);
                 o.ef = Some("low");
                 let (_, js) = ask(a, o).await?;
                 let by = okc.iter().filter_map(|c| c["by"].as_str()).collect::<Vec<_>>().join(", ");
                 let act = js["act"].as_bool().unwrap_or(false);
+                let rp = js["reply"].as_str().unwrap_or("").trim().to_string();
+                let wk = format!("wr:{tag}");
+                if ma && !rp.is_empty() && a.db.kg(&wk).as_i64().map(|t| now() - t > 86_400_000).unwrap_or(true) {
+                    match gh(&["pr", "comment", &n.to_string(), "-R", &r, "--body", &crate::sh::head(&rp, 1500)], 60).await {
+                        Ok(_) => {
+                            a.db.ks(&wk, &json!(now()));
+                            a.say("watcher", &format!("{tag}: answered {by}"), None);
+                        }
+                        Err(e) => a.say("watcher", &format!("{tag}: reply failed: {e}"), None),
+                    }
+                }
                 if act && ma && a.db.n("select count(*) from jobs where repo=? and pr=? and kind='review' and st not in ('done','drop')", pa![r.clone(), n]) == 0 {
                     let ch = js["change"].as_str().unwrap_or("").to_string();
                     a.db.jnew(&r, n, "review", v["title"].as_str().unwrap_or(""), v["url"].as_str().unwrap_or(""), "ready", &ch, json!({"change": ch, "comment": crate::sh::head(&mc.iter().map(|c| format!("{}: {}", c["by"].as_str().unwrap_or(""), c["t"].as_str().unwrap_or(""))).collect::<Vec<_>>().join("\n\n"), 6000), "branch": hrn, "head": hd, "test_cmd": p["d"]["test_cmd"]}), Some(n), -1.0);
