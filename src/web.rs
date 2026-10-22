@@ -830,6 +830,7 @@ async fn api(a: &Ax, m: &Method, p: &str, q: &str, b: Value) -> Response<Body> {
             }
         }
         ("GET", "/api/cost") => js(costs(a)),
+        ("GET", "/api/usage") => js(crate::usage::read(a).await),
         ("GET", "/api/health") => js(health(a, qv("f") == "1").await),
         ("GET", "/api/export") => js(export(a)),
         ("POST", "/api/import") => match import(a, &b) {

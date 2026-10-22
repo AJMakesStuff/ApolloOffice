@@ -248,6 +248,7 @@
       const r = await post(body, "/api/set");
       $("rm").className = r.error ? "msg bad2" : "msg";
       $("rm").textContent = r.error || "Saved.";
+      A.refreshUsage?.();
     };
   };
   A.role = role;
@@ -267,7 +268,7 @@
         <div class="hint">Without a token Claude Code uses its own login on this computer.</div>
         <label>Ollama address</label><input type="text" name="ollama" value="${esc(s.prov?.ollama?.base || "")}" placeholder="${esc(ol.dbase)}">
         <label>Ollama context</label><input type="number" name="octx" min="2048" step="1024" value="${s.prov?.ollama?.ctx || 32768}"><div class="hint">Tokens per request. Ollama's default of 4096 is too small for the workers.</div>
-        <div class="hint">Keys are stored encrypted on this computer. Claude Code and Codex use their own CLI logins. Pick a model per worker under Models below.</div>
+        <div class="hint">Keys are stored encrypted on this computer. Claude Code and Codex use their own CLI logins. The header refreshes their 5-hour and weekly limits every 10 minutes when available; API-key providers and local models do not expose a shared subscription quota. Pick a model per worker under Models below.</div>
       </div></div></div>
       <div class="sec"><h4>Models</h4><div class="box"><div class="fm" style="margin:0">
         ${["scout", "guard", "vet", "hunter", "repro", "fixer", "reviewer", "watcher"].map((w) => `<label>${esc(A.NM?.[w] || w)}</label><div class="ck"><span style="flex:1">${RK[w].map(([k, l]) => esc((RK[w].length > 1 ? l + ": " : "") + (A.mdn ? A.mdn(s.md[k]) : s.md[k]))).join(" · ")}</span><button type="button" data-role="${w}">Change</button></div>`).join("")}
@@ -371,6 +372,7 @@
       const r = await post({ wh: { on: v.whon, from: v.whf, to: v.wht }, hunters: v.hunters, tokday: v.tokday, ntfy: v.ntfy, discord: v.discord, auto: v.auto, updates: v.updates, ollama: v.ollama, octx: v.octx, cckc: v.cckc, test }, "/api/set");
       if (r.error) { $("sm").className = "msg bad2"; $("sm").textContent = r.error; return; }
       await settings();
+      A.refreshUsage?.();
       $("sm").textContent = test ? "Saved and test sent." : "Saved.";
     };
     $("fs").onsubmit = (e) => { e.preventDefault(); send(false); };

@@ -14,6 +14,7 @@ mod sh;
 mod star;
 mod sys;
 mod upd;
+mod usage;
 mod vault;
 mod web;
 mod wk;

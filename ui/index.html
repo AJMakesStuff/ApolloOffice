@@ -46,6 +46,9 @@ h1 { font: 600 14px/1 var(--m); letter-spacing: .12em; text-transform: uppercase
 .chip.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
 .chip.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
 .chip.info { color: var(--info); border-color: color-mix(in srgb, var(--info) 40%, transparent); }
+.usage { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.usage .chip { flex: none; }
+.usage .chip.stale { border-style: dashed; }
 .sp { flex: 1; }
 button.hc { cursor: pointer; flex: none; display: inline-flex; gap: 5px; align-items: center; }
 button.hc:hover { background: var(--f); }
@@ -200,7 +203,7 @@ pre.df .ad { color: var(--ok); } pre.df .rm { color: var(--bad); } pre.df .hh { 
 .warn { border: 1px solid color-mix(in srgb, var(--bad) 50%, transparent); color: var(--t1); border-radius: 6px; padding: 8px 10px; font-size: 12px; margin: 8px 0; }
 .empty { color: var(--t3); font: 12px var(--m); padding: 4px 0; }
 @media (max-width: 1100px) { .tiles { grid-template-columns: repeat(5, minmax(0, 1fr)); } .tile { height: 56px; } .tile .sy { -webkit-line-clamp: 1; } }
-@media (max-width: 860px) { body { grid-template-rows: auto auto minmax(0, 1.1fr); } body.sb { grid-template-rows: auto auto auto minmax(0, 1.1fr); } main { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); } .side { grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0, 1fr); } .side .card:last-child { display: none; } .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } #cQ, #cHo { display: none; } }
+@media (max-width: 860px) { header { flex-wrap: wrap; } body { grid-template-rows: auto auto minmax(0, 1.1fr); } body.sb { grid-template-rows: auto auto auto minmax(0, 1.1fr); } main { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); } .side { grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0, 1fr); } .side .card:last-child { display: none; } .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } #cQ, #cHo { display: none; } }
 @media (max-width: 700px) {
   html, body { height: auto; overflow: auto; }
   body { display: block; padding: 10px; }
@@ -230,6 +233,7 @@ pre.df .ad { color: var(--ok); } pre.df .rm { color: var(--bad); } pre.df .hh { 
   <span class="chip" id="cHo"></span>
   <span class="chip" id="cQ"></span>
   <span class="sp"></span>
+  <div id="cUsage" class="usage" aria-label="Provider usage" aria-live="polite" hidden></div>
   <button id="bCost">Costs</button>
   <button id="bRepos">Repos</button>
   <button id="bHosts">Machines</button>

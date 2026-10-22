@@ -27,13 +27,14 @@
 <div class="wrap">
 <nav><a class="brand" href="/">ApolloOffice</a><a href="https://github.com/Silvertree2010/ApolloOffice">GitHub</a><a href="/privacy">Privacy</a></nav>
 <h1>Privacy policy</h1>
-<p class="muted">Last updated: 19 October 2026</p>
+<p class="muted">Last updated: 23 October 2026</p>
 <p>ApolloOffice is software that runs on your own computer. We do not operate a server for it, we do not have user accounts, and the software sends us no data at all: no telemetry, no crash reports, no usage statistics.</p>
 <h2>Sign in with Google</h2>
 <p>You can connect a Google account as a way to sign in to your own ApolloOffice. ApolloOffice then asks Google for the scopes <code>openid</code> and <code>email</code> only. It receives your Google account ID and your email address and stores them in the local database on your computer, to recognise that account the next time you sign in. The access token from Google is used once for this and is not stored. None of this data leaves your computer or reaches us. You can disconnect Google in Settings at any time, which deletes the stored ID and address. You can also revoke access in your Google account under Security, Third-party connections.</p>
 <p>ApolloOffice's use and transfer of information received from Google APIs adheres to the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
 <h2>Services you connect</h2>
 <p>ApolloOffice works with accounts you set up yourself: GitHub through the GitHub CLI, and the AI providers you choose (for example Anthropic, OpenAI, Google Gemini or a local Ollama). To fix a bug it sends issue text and repository code to the AI provider you picked for a worker, and it creates commits and pull requests on GitHub under your account. These transfers go directly from your computer to those services and fall under their privacy policies. API keys you enter are stored encrypted on your computer.</p>
+<p>When a Claude Code or Codex CLI login is selected for a worker, ApolloOffice can also read that provider's 5-hour and weekly subscription limits for the dashboard header. It reads the local CLI login and sends a read-only usage request directly to that provider every 5 to 10 minutes while the dashboard is open. Usage readings are kept in memory on your computer and are not sent to ApolloOffice or stored in its database. Providers using API keys or local models do not expose a shared subscription window.</p>
 <h2>This website</h2>
 <p>office.apollonet.dev is a static page served by Cloudflare. It sets no cookies and uses no analytics. Cloudflare processes technical request data such as IP addresses to deliver the page and protect it from abuse.</p>
 <h2>Contact</h2>

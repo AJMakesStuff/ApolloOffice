@@ -493,6 +493,29 @@
     document.body.classList.toggle("sb", !!S.star);
   };
 
+  const usageLabel = (w) => w.kind === "five_hour" ? "5h" : w.kind === "weekly" ? "wk" : w.kind;
+  const usage = async () => {
+    const el = $("cUsage");
+    if (!el) return;
+    try {
+      const data = await get("/api/usage");
+      const rows = data.providers || [];
+      el.hidden = rows.length === 0;
+      el.innerHTML = rows.map((p) => {
+        const windows = p.windows || [];
+        const values = windows.map((w) => `${usageLabel(w)} ${Math.round(w.remaining)}%`).join(" · ");
+        const cls = !p.available ? "chip" : windows.some((w) => w.remaining <= 10) ? "chip bad" : windows.some((w) => w.remaining <= 25) ? "chip info" : "chip ok";
+        const title = p.available
+          ? `${p.name}: ${windows.map((w) => `${usageLabel(w)} ${Math.round(w.remaining)}% remaining${w.resetAt ? `, resets ${new Date(w.resetAt * 1000).toLocaleString()}` : ""}`).join("; ")}${p.stale ? `; last successful check ${new Date(p.updatedAt).toLocaleString()}; refresh failed: ${p.message}` : `; checked ${new Date(p.updatedAt).toLocaleTimeString()}`}`
+          : `${p.name}: ${p.message || "usage unavailable"}`;
+        return `<span class="${cls}${p.stale ? " stale" : ""}" title="${esc(title)}">${esc(p.name)} ${esc(values || (p.stale ? "stale" : "usage unavailable"))}</span>`;
+      }).join("");
+    } catch {}
+  };
+  window.AO.refreshUsage = usage;
+  usage();
+  setInterval(usage, 600000);
+
   let seen = null;
   const nt = (s) => {
     const ap = s.q.filter((j) => j.st === "approve");
