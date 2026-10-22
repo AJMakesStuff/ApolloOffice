@@ -421,10 +421,23 @@ WORKDIR /work
 
 pub fn dkup(h: &Ho, cpu: i64) -> String {
     format!(
-        "command -v docker >/dev/null || {{ echo 'docker is not installed'; exit 2; }}\ndocker info >/dev/null 2>&1 || {{ echo 'docker is not running'; exit 2; }}\nif ! docker image inspect {im} >/dev/null 2>&1; then docker build -q -t {im} - <<'DOCKERFILE'\n{DF}DOCKERFILE\nfi\nold=$(docker inspect -f '{{{{.Config.Image}}}}' {CT} 2>/dev/null)\nif [ -n \"$old\" ] && [ \"$old\" != {im} ]; then docker rm -f {CT} >/dev/null 2>&1; fi\nr=$(docker inspect -f '{{{{.State.Running}}}}' {CT} 2>/dev/null)\nif [ -z \"$r\" ]; then docker run -d --name {CT} --restart unless-stopped --cpus {cpu} --cpu-shares 128 -v apollo-office-work:/work -v apollo-office-cargo:/usr/local/cargo/registry {im} sleep infinity >/dev/null 2>&1 || [ \"$(docker inspect -f '{{{{.State.Running}}}}' {CT} 2>/dev/null)\" = true ] || docker start {CT} >/dev/null || exit 3; elif [ \"$r\" != true ]; then docker start {CT} >/dev/null || exit 3; fi\ndocker update --cpus {cpu} --cpu-shares 128 {CT} >/dev/null 2>&1\ndocker images apollo-office-build --format '{{{{.Repository}}}}:{{{{.Tag}}}}' | grep -vx {im} | xargs -r docker rmi >/dev/null 2>&1\necho ok {}\n",
+        "command -v docker >/dev/null || {{ echo 'docker is not installed'; exit 2; }}\ndocker info >/dev/null 2>&1 || {{ echo 'docker is not running'; exit 2; }}\nif ! docker image inspect {im} >/dev/null 2>&1; then docker build -q -t {im} - <<'DOCKERFILE'\n{DF}DOCKERFILE\nfi\nold=$(docker inspect -f '{{{{.Config.Image}}}}' {CT} 2>/dev/null)\nif [ -n \"$old\" ] && [ \"$old\" != {im} ]; then docker rm -f {CT} >/dev/null 2>&1; fi\nr=$(docker inspect -f '{{{{.State.Running}}}}' {CT} 2>/dev/null)\nm=$(( $(docker info --format '{{{{.MemTotal}}}}' 2>/dev/null || echo 0) / 1048576 - 3072 ))\n[ \"$m\" -lt 2048 ] && m=2048\nif [ -z \"$r\" ]; then docker run -d --name {CT} --restart unless-stopped --cpus {cpu} --cpu-shares 128 --memory \"$m\"m --memory-swap \"$m\"m -v apollo-office-work:/work -v apollo-office-cargo:/usr/local/cargo/registry {im} sleep infinity >/dev/null 2>&1 || [ \"$(docker inspect -f '{{{{.State.Running}}}}' {CT} 2>/dev/null)\" = true ] || docker start {CT} >/dev/null || exit 3; elif [ \"$r\" != true ]; then docker start {CT} >/dev/null || exit 3; fi\ndocker update --cpus {cpu} --cpu-shares 128 --memory \"$m\"m --memory-swap \"$m\"m {CT} >/dev/null 2>&1\ndocker images apollo-office-build --format '{{{{.Repository}}}}:{{{{.Tag}}}}' | grep -vx {im} | xargs -r docker rmi >/dev/null 2>&1\necho ok {}\n",
         h.id,
         im = im()
     )
+}
+
+pub async fn orph(a: &Ax, id: &str) {
+    let Some(h) = ho(a, id) else { return };
+    if !h.dk {
+        return;
+    }
+    let b = hb(a, &h);
+    let r = hx(a, id, &format!("n=0; for p in $(pgrep -f \"{b}/\"); do [ \"$p\" = $$ ] || {{ kill -9 \"$p\" 2>/dev/null && n=$((n+1)); }}; done; echo $n"), 60).await;
+    let n = r.o.trim().parse::<i64>().unwrap_or(0);
+    if n > 0 {
+        a.say("ci", &format!("[{id}] back online, killed {n} orphaned build processes"), None);
+    }
 }
 
 pub async fn ensure(a: &Ax, id: &str) -> Result<(), String> {

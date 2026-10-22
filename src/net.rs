@@ -52,7 +52,10 @@ pub async fn probe(a: &Ax, ks: &[String]) {
     for (k, ok) in ks.iter().zip(v) {
         let n = if ok { 0 } else { f.get(k).copied().unwrap_or(0) + 1 };
         f.insert(k.clone(), n);
-        l.o.net.insert(k.clone(), n < 2);
+        if l.o.net.insert(k.clone(), n < 2) == Some(false) && n == 0 && k != "gh" && k != "an" {
+            let (a2, id) = (a.clone(), k.clone());
+            tokio::spawn(async move { crate::sh::orph(&a2, &id).await });
+        }
     }
     l.o.off = !*l.o.net.get("gh").unwrap_or(&true) || !*l.o.net.get("an").unwrap_or(&true);
     LAST.store(now(), Ordering::Relaxed);
