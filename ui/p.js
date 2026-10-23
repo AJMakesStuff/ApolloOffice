@@ -315,6 +315,7 @@
       <div class="acts"><button class="pri">Save</button></div><div class="msg" id="sm"></div></form>
       <div class="sec dz"><h4>Danger zone</h4><div class="box">
         <div class="dzr"><div><b>Sign out everywhere</b><div class="hint">Ends every session, including this one. You need a new link from <code>apollo-office login-link</code>.</div></div><button type="button" class="dng" data-dz="logout">Sign out everywhere</button></div>
+        <div class="dzr"><div><b>Clear the queue</b><div class="hint">Deletes queued and dropped jobs and their log. Finished jobs, pull requests and costs stay.</div></div><button type="button" class="dng" data-dz="queue">Clear queue</button></div>
         <div class="dzr"><div><b>Clear job history</b><div class="hint">Deletes finished and dropped jobs and their log. Pull requests and costs stay.</div></div><button type="button" class="dng" data-dz="history">Clear history</button></div>
         <div class="dzr"><div><b>Reset settings</b><div class="hint">Models, limits, budgets, notifications and paused workers go back to defaults. Keys, repositories and machines stay.</div></div><button type="button" class="dng" data-dz="reset">Reset settings</button></div>
         <div class="dzr"><div><b>Delete all data</b><div class="hint">Deletes repositories, machines, jobs, pull request history, costs, settings and stored API keys. Nothing on GitHub changes. Type <code>delete</code> to confirm.</div><input type="text" id="dzw" placeholder="delete" autocomplete="off" style="margin-top:6px;max-width:160px"></div><button type="button" class="dng" data-dz="wipe">Delete everything</button></div>
@@ -360,7 +361,7 @@
       if (op === "logout") { location.reload(); return; }
       if (op === "wipe") { hide(); location.reload(); return; }
       await settings();
-      $("dzm").className = "msg"; $("dzm").textContent = op === "history" ? "Job history cleared." : "Settings reset.";
+      $("dzm").className = "msg"; $("dzm").textContent = op === "queue" ? "Queue and dropped jobs cleared." : op === "history" ? "Job history cleared." : "Settings reset.";
     };
     const send = async (test) => {
       const f = $("fs"), v = fv(f);

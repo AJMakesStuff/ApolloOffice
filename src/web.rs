@@ -849,6 +849,32 @@ async fn api(a: &Ax, m: &Method, p: &str, q: &str, b: Value) -> Response<Body> {
                     a.db.run("delete from ev where j is null or j not in (select id from jobs)", pa![]);
                     a.say("scout", "job history cleared", None);
                 }
+                "queue" => {
+                    // Keep workers from picking another row while we flag and remove the queue.
+                    let lk = a.lk.lock().unwrap();
+                    let vtk = a.vtk.lock().unwrap();
+                    let mut active: Vec<i64> = a
+                        .db
+                        .all(
+                            "select id from jobs where st in ('repro','fix','ci','review','gate','hunt','submit')",
+                            pa![],
+                        )
+                        .iter()
+                        .filter_map(|x| x["id"].as_i64())
+                        .collect();
+                    active.extend(lk.iter().copied());
+                    active.extend(vtk.iter().copied());
+                    active.sort_unstable();
+                    active.dedup();
+                    for id in active {
+                        a.db.ks(&format!("kill:{id}"), &json!(true));
+                    }
+                    a.db.run("delete from ev where j in (select id from jobs where st<>'done')", pa![]);
+                    a.db.run("delete from jobs where st<>'done'", pa![]);
+                    drop(vtk);
+                    drop(lk);
+                    a.say("scout", "queue and dropped jobs cleared", None);
+                }
                 "reset" => {
                     for k in ["set", "hold", "man"] {
                         a.db.kd(k);
