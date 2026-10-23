@@ -494,27 +494,47 @@
   };
 
   const usageLabel = (w) => w.kind === "five_hour" ? "5h" : w.kind === "weekly" ? "wk" : w.kind;
-  const usage = async () => {
+  const usageReset = (w) => {
+    if (!w.resetAt) return "";
+    const seconds = Math.max(0, Number(w.resetAt) - Date.now() / 1000);
+    if (seconds < 60) return seconds > 0 ? "Reset in <1m" : "Reset due";
+    const minutes = Math.ceil(seconds / 60);
+    const days = Math.floor(minutes / 1440);
+    const hours = Math.floor((minutes % 1440) / 60);
+    if (days) return `Reset in ${days}d ${hours}h`;
+    if (hours) return `Reset in ${hours}h ${minutes % 60}m`;
+    return `Reset in ${minutes}m`;
+  };
+  let usageRows = [];
+  const renderUsage = () => {
     const el = $("cUsage");
     if (!el) return;
+    el.hidden = usageRows.length === 0;
+    el.innerHTML = usageRows.map((p) => {
+      const windows = p.windows || [];
+      const values = windows.map((w) => {
+        const reset = usageReset(w);
+        return `${esc(usageLabel(w))} <b>${Math.round(w.remaining)}%</b>${reset ? ` · ${esc(reset)}` : ""}`;
+      }).join(" · ");
+      const title = p.available
+        ? `${p.name}: ${windows.map((w) => `${usageLabel(w)} ${Math.round(w.remaining)}% remaining${w.resetAt ? `, resets ${new Date(w.resetAt * 1000).toLocaleString()}` : ""}`).join("; ")}${p.stale ? `; last successful check ${new Date(p.updatedAt).toLocaleString()}; refresh failed: ${p.message}` : `; checked ${new Date(p.updatedAt).toLocaleTimeString()}`}`
+        : `${p.name}: ${p.message || "usage unavailable"}`;
+      const display = p.available && values ? values : "usage unavailable";
+      return `<span class="chip" title="${esc(title)}">${esc(p.name)} · ${display}${p.stale ? " · stale" : ""}</span>`;
+    }).join("");
+  };
+  const usage = async () => {
+    if (!$("cUsage")) return;
     try {
       const data = await get("/api/usage");
-      const rows = data.providers || [];
-      el.hidden = rows.length === 0;
-      el.innerHTML = rows.map((p) => {
-        const windows = p.windows || [];
-        const values = windows.map((w) => `${usageLabel(w)} ${Math.round(w.remaining)}%`).join(" · ");
-        const cls = !p.available ? "chip" : windows.some((w) => w.remaining <= 10) ? "chip bad" : windows.some((w) => w.remaining <= 25) ? "chip info" : "chip ok";
-        const title = p.available
-          ? `${p.name}: ${windows.map((w) => `${usageLabel(w)} ${Math.round(w.remaining)}% remaining${w.resetAt ? `, resets ${new Date(w.resetAt * 1000).toLocaleString()}` : ""}`).join("; ")}${p.stale ? `; last successful check ${new Date(p.updatedAt).toLocaleString()}; refresh failed: ${p.message}` : `; checked ${new Date(p.updatedAt).toLocaleTimeString()}`}`
-          : `${p.name}: ${p.message || "usage unavailable"}`;
-        return `<span class="${cls}${p.stale ? " stale" : ""}" title="${esc(title)}">${esc(p.name)} ${esc(values || (p.stale ? "stale" : "usage unavailable"))}</span>`;
-      }).join("");
+      usageRows = data.providers || [];
+      renderUsage();
     } catch {}
   };
   window.AO.refreshUsage = usage;
   usage();
   setInterval(usage, 600000);
+  setInterval(renderUsage, 60000);
 
   let seen = null;
   const nt = (s) => {
